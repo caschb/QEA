@@ -9,7 +9,14 @@ authors = [
     { name = "Christian Asch", email = "christian.asch4@outlook.com" },
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.11.1",
+    "networkx>=3.6.1",
+    "numpy>=2.5.2",
+    "qiskit>=2.5.2",
+    "qiskit-aer>=0.17.2",
+    "scipy>=1.18.1",
+]
 
 [project.scripts]
 qea = "qea:main"

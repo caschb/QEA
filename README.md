@@ -20,10 +20,10 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 
 ## Requisitos
 
-- Python 3.9 o superior
+- Python 3.13 o superior
 
 ```bash
-pip install numpy scipy matplotlib networkx qiskit qiskit-aer
+uv sync
 ```
 
 `qiskit` y `qiskit-aer` solo son necesarios si se usa el modo de observación cuántica real. El script también ofrece un modo clásico (muestreo pseudoaleatorio) que reproduce el colapso del Q-bit sin simulador.
@@ -35,7 +35,7 @@ pip install numpy scipy matplotlib networkx qiskit qiskit-aer
 ```bash
 git clone https://github.com/johan-carvajal-godinez/QEA.git
 cd QEA
-python qea_rover_integrado_mejorado.py
+uv run qea
 ```
 
 El script abre un **diálogo interactivo**. Presiona Enter en cualquier pregunta para aceptar el valor por defecto entre corchetes.
@@ -107,8 +107,12 @@ Si prefieres saltarte el diálogo interactivo e integrar el código en tus propi
 ```python
 import numpy as np
 from qea_rover_integrado_mejorado import (
-    ExperimentConfig, ChromosomeEvaluator,
-    QEA, GeneticAlgorithm, plot_comparison, run_statistical_analysis
+    ExperimentConfig,
+    ChromosomeEvaluator,
+    QEA,
+    GeneticAlgorithm,
+    plot_comparison,
+    run_statistical_analysis,
 )
 
 n = 8
@@ -123,10 +127,10 @@ for i in range(n):
 # 2. Configuración compartida
 cfg = ExperimentConfig(
     n_agents=n,
-    constraints=[[1, 2, 3], [4, 5, 6]],   # nodo 1 maestro de 2,3 — nodo 4 de 5,6
+    constraints=[[1, 2, 3], [4, 5, 6]],  # nodo 1 maestro de 2,3 — nodo 4 de 5,6
     max_generations=150,
     rotation_scheme="I",
-    use_qiskit=False,                      # True para simulación con Qiskit
+    use_qiskit=False,  # True para simulación con Qiskit
     seed=42,
 )
 
@@ -135,7 +139,7 @@ ev = ChromosomeEvaluator(cfg.n_agents, cost_matrix, cfg.constraints)
 
 # 4. Ejecutar
 qea = QEA(cfg, ev).run(verbose=True)
-ga  = GeneticAlgorithm(cfg, ev).run(verbose=True)
+ga = GeneticAlgorithm(cfg, ev).run(verbose=True)
 
 print(f"QEA: {qea.best_fitness:.4f}   GA: {ga.best_fitness:.4f}")
 
