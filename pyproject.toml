@@ -26,7 +26,66 @@ requires = ["uv_build>=0.12.9,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "ruff>=0.16.5",
-    "ty>=0.0.77",
+dev = ["ruff>=0.16.5", "ty>=0.0.77"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+fix = true
+
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = 'lf'
+
+
+[tool.ruff.lint]
+ignore = []
+select = [
+    'ERA',
+    'YTT',
+    'ANN',
+    'S',
+    'BLE',
+    'FBT',
+    'B',
+    'A',
+    'COM',
+    'C4',
+    'EM',
+    'INT',
+    'ISC',
+    'ICN',
+    'INP',
+    'PIE',
+    'PYI',
+    'Q',
+    'RSE',
+    'RET',
+    'SLF',
+    'SIM',
+    'TID',
+    'TC',
+    'ARG',
+    'PTH',
+    'FLY',
+    'I',
+    'C90',
+    'NPY',
+    'PD',
+    'N',
+    'PERF',
+    'E',
+    'W',
+    'F',
+    'PLC',
+    'PLE',
+    'PLR',
+    'PLW',
+    'UP',
+    'FURB',
+    'RUF',
+    'TRY',
 ]
