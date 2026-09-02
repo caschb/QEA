@@ -8,8 +8,9 @@ resuelvan exactamente el mismo problema con las mismas restricciones.
 """
 
 import random as rd
-import numpy as np
+
 import networkx as nx
+import numpy as np
 
 
 class Chromosome:   # Class For Creating Topologies for MAS-based Architectures

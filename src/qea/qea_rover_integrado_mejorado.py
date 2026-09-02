@@ -20,24 +20,23 @@ Tutor: Dr. Ing. Johan Carvajal Godínez
 =============================================================================
 """
 
-import numpy as np
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from dataclasses import dataclass, field
-from typing import List, Optional
-import time
-import copy
-import warnings
-warnings.filterwarnings("ignore")
+import numpy as np
 
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
-from qiskit_aer import AerSimulator
+matplotlib.use("Agg")
+import time
+import warnings
+from dataclasses import dataclass, field
+
+import matplotlib.pyplot as plt
+from matplotlib import gridspec
+
+warnings.filterwarnings("ignore")
 
 # Clase original del Dr. Carvajal — NO se modifica
 from chromosome import Chromosome
-
+from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
+from qiskit_aer import AerSimulator
 
 # =============================================================================
 # 1. EVALUADOR COMPARTIDO — el núcleo de la comparación justa
@@ -59,7 +58,7 @@ class ChromosomeEvaluator:
     """
 
     def __init__(self, n_agents: int, cost_matrix: np.ndarray,
-                 constraints: Optional[List] = None):
+                 constraints: list | None = None):
         """
         Parámetros
         ----------
@@ -151,7 +150,7 @@ class ExperimentConfig:
     seed: int             = 42
     # Restricciones de organización (node_list para set_constraint_org_team)
     # Ejemplo: [[1,2,3],[1,4,5]]  →  nodo 1 es maestro de 2,3 y de 4,5
-    constraints: List     = field(default_factory=list)
+    constraints: list     = field(default_factory=list)
     # QEA
     theta_initial: float  = 0.05 * np.pi
     theta_min: float      = 0.001 * np.pi
@@ -169,9 +168,9 @@ class AlgorithmResult:
     """Resultado estándar, igual para QEA y GA."""
     best_binary: np.ndarray
     best_fitness: float
-    fitness_history: List[float]   = field(default_factory=list)
-    best_history: List[float]      = field(default_factory=list)
-    diversity_history: List[float] = field(default_factory=list)
+    fitness_history: list[float]   = field(default_factory=list)
+    best_history: list[float]      = field(default_factory=list)
+    diversity_history: list[float] = field(default_factory=list)
     time_elapsed: float            = 0.0
     label: str                     = ""
 
@@ -1036,7 +1035,7 @@ if __name__ == "__main__":
     print(f"  GA  mejor CI     : {ga_result.best_fitness:.4f}")
     print(f"  Δ (GA − QEA)     : {delta:+.4f}  "
           f"({'QEA mejor' if delta > 0 else 'GA mejor' if delta < 0 else 'empate'})")
-    print(f"  Función aptitud  : Chromosome.get_total_cost()  ← idéntica en ambos")
+    print("  Función aptitud  : Chromosome.get_total_cost()  ← idéntica en ambos")
     print(f"  Genes protegidos : {len(evaluator.get_protected_indices())}  "
           f"← respetados por QEA y GA")
     print(f"  Wilcoxon p-valor : {stats['p_value']:.4f}  "
