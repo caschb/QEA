@@ -1,1 +1,40 @@
-n_agents = 8
+# Configuración del experimento QEA vs GA.
+# Cada clave corresponde a un campo de ExperimentConfig (src/qea/config.py);
+# los valores aquí son los mismos que los valores por defecto del dataclass.
+# Ejecutar: qea -c config.toml   (sin -c se usan estos mismos defaults)
+
+# ── Problema ─────────────────────────────────────────────────────────────
+n_agents = 8                # subsistemas del rover -> n(n-1)/2 = 28 genes; >= 3
+scenario = "nominal"        # "nominal" | "safe" | "critical"
+max_generations = 150       # >= 1
+seed = 42                   # >= 0
+
+# Restricciones de organización (node_list para set_constraint_org_team).
+# Cada sub-lista es un equipo: el primer nodo es el maestro y los demás sus
+# subordinados. Los nodos se numeran de 1 a n_agents.
+# Ejemplo: [[1, 2, 3], [1, 4, 5]] -> el nodo 1 es maestro de 2,3 y de 4,5.
+# Cada equipo necesita >= 2 nodos, sin repetir, dentro de 1..n_agents.
+constraints = []
+
+# ── QEA ──────────────────────────────────────────────────────────────────
+theta_initial = 0.15707963267948966   # 0.05 * pi rad, angulo inicial; > 0
+theta_min = 0.0031415926535897933     # 0.001 * pi rad, piso GDAA; 0 < x <= theta_initial
+decay_rate = 0.02                     # lambda del decaimiento GDAA; >= 0 (0 = sin decaimiento)
+rotation_scheme = "I"                 # "I" complejo | "II" conservador | "III" agresivo
+use_qiskit = true                     # false -> observacion clasica (mucho mas rapida)
+
+# Metodo de simulacion de AerSimulator (solo si use_qiskit = true):
+# "automatic" | "statevector" | "density_matrix" | "matrix_product_state"
+# | "stabilizer" | "extended_stabilizer" | "unitary" | "superop"
+# "automatic" deja que Aer elija segun el circuito.
+aer_method = "automatic"
+
+# ── GA ───────────────────────────────────────────────────────────────────
+pop_size = 30               # >= 3 (el torneo toma 3 individuos)
+mutation_rate = 0.02        # 0.0 .. 1.0
+crossover_rate = 0.8        # 0.0 .. 1.0
+
+# ── Análisis estadístico ─────────────────────────────────────────────────
+# Minimo 2 (lo exige la prueba de Wilcoxon).
+# Para resultados publicables se recomiendan >= 30 réplicas.
+n_replicas = 8

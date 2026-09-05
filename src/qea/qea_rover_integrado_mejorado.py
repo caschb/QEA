@@ -1,6 +1,6 @@
 """
 =============================================================================
-qea_rover_integrado.py
+qea_rover_integrado_mejorado.py
 =============================================================================
 QEA vs GA — Comparación justa usando la clase Chromosome del
 Dr. Johan Carvajal Godínez como evaluador compartido.
@@ -21,16 +21,18 @@ Tutor: Dr. Ing. Johan Carvajal Godínez
 """
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit_aer import AerSimulator
+from scipy import stats
 
 # Clase original del Dr. Carvajal — NO se modifica
 from .chromosome import Chromosome
+from .config import ExperimentConfig
 
 # =============================================================================
 # 1. EVALUADOR COMPARTIDO — el núcleo de la comparación justa
@@ -134,31 +136,8 @@ class ChromosomeEvaluator:
 
 
 # =============================================================================
-# 2. CONFIGURACIÓN
+# 2. RESULTADO ESTÁNDAR
 # =============================================================================
-
-
-@dataclass
-class ExperimentConfig:
-    """Parámetros únicos compartidos por QEA y GA."""
-
-    n_agents: int = 8
-    scenario: str = "nominal"
-    max_generations: int = 150
-    seed: int = 42
-    # Restricciones de organización (node_list para set_constraint_org_team)
-    # Ejemplo: [[1,2,3],[1,4,5]]  →  nodo 1 es maestro de 2,3 y de 4,5
-    constraints: list = field(default_factory=list)
-    # QEA
-    theta_initial: float = 0.05 * np.pi
-    theta_min: float = 0.001 * np.pi
-    decay_rate: float = 0.02
-    rotation_scheme: str = "I"  # "I" | "II" | "III"  — ver QuantumChromosome
-    use_qiskit: bool = True
-    # GA
-    pop_size: int = 30
-    mutation_rate: float = 0.02
-    crossover_rate: float = 0.8
 
 
 @dataclass
@@ -188,7 +167,7 @@ class QuantumChromosome:
     para reflejar los golden_genes de Chromosome.
     """
 
-    def __init__(self, n_genes: int, locked_indices: np.ndarray = None):
+    def __init__(self, n_genes: int, locked_indices: np.ndarray | None = None) -> None:
         self.n_genes = n_genes
         self.amplitudes = np.full((n_genes, 2), 1.0 / np.sqrt(2))
         self.locked = (
@@ -289,10 +268,15 @@ class QuantumChromosome:
 
 
 class QiskitObserver:
-    """Observación del cromosoma Q-bit mediante circuito Qiskit/Aer."""
+    """Observación del cromosoma Q-bit mediante circuito Qiskit/Aer.
 
-    def __init__(self):
-        self.simulator = AerSimulator()
+    `method` es el método de simulación de AerSimulator ("automatic",
+    "statevector", "matrix_product_state", ...); ExperimentConfig lo valida
+    contra los métodos que admite la versión de qiskit-aer instalada.
+    """
+
+    def __init__(self, method: str = "automatic") -> None:
+        self.simulator = AerSimulator(method=method)
 
     def observe(self, chromosome: QuantumChromosome) -> np.ndarray:
         n = chromosome.n_genes
@@ -329,7 +313,7 @@ class QEA:
         self.n_genes = evaluator.n_genes
         self.rng = np.random.default_rng(cfg.seed)
         if cfg.use_qiskit:
-            self.observer = QiskitObserver()
+            self.observer = QiskitObserver(cfg.aer_method)
 
     def _observe(self, chromosome: QuantumChromosome) -> np.ndarray:
         if self.cfg.use_qiskit:
@@ -542,7 +526,6 @@ class GeneticAlgorithm:
 def run_statistical_analysis(
     cfg: ExperimentConfig,
     cost_matrix: np.ndarray,
-    n_replicas: int = 30,
     verbose: bool = True,
 ) -> dict:
     """
@@ -550,8 +533,7 @@ def run_statistical_analysis(
     Prueba de Wilcoxon (no paramétrica, α=0.05).
     Misma ChromosomeEvaluator en QEA y GA → comparación válida.
     """
-    from scipy import stats
-
+    n_replicas = cfg.n_replicas
     qea_scores, ga_scores = [], []
     qea_times, ga_times = [], []
 
@@ -561,13 +543,12 @@ def run_statistical_analysis(
     print(f"{'=' * 62}")
 
     for rep in range(n_replicas):
-        rep_cfg = ExperimentConfig(
-            n_agents=cfg.n_agents,
-            scenario=cfg.scenario,
-            max_generations=cfg.max_generations,
-            theta_initial=cfg.theta_initial,
+        # replace() conserva el resto de los parámetros de cfg (decay_rate,
+        # rotation_scheme, pop_size, mutation_rate, crossover_rate): las
+        # réplicas deben diferir de la corrida principal solo en la semilla.
+        rep_cfg = replace(
+            cfg,
             use_qiskit=False,  # rápido para réplicas masivas
-            constraints=cfg.constraints,
             seed=cfg.seed + rep * 137,
         )
         # Misma evaluador para ambos en esta réplica
@@ -715,7 +696,7 @@ def plot_comparison(
     # Nombres automáticos: escala a cualquier n_agents sin cambiar nada
     agent_names = [f"A{i + 1}" for i in range(cfg.n_agents)]
 
-    def draw_topo(ax, binary, result, node_color, title):
+    def draw_topo(ax, binary, node_color, title):
         ax.set_facecolor(bg)
         ax.axis("off")
         ax.set_title(title, color=txt, fontsize=8.5, fontweight="bold")
@@ -780,7 +761,6 @@ def plot_comparison(
     draw_topo(
         ax3,
         qea_r.best_binary,
-        qea_r,
         "#00d4aa",
         f"Topología QEA\nCI = {qea_r.best_fitness:.3f}",
     )
@@ -789,7 +769,6 @@ def plot_comparison(
     draw_topo(
         ax4,
         ga_r.best_binary,
-        ga_r,
         "#4fc3f7",
         f"Topología GA\nCI = {ga_r.best_fitness:.3f}",
     )
@@ -863,355 +842,3 @@ def plot_comparison(
     )
     plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="#0a0f18")
     print(f"  ✓ Figura guardada: {save_path}")
-
-
-# =============================================================================
-# 9. EJECUCIÓN PRINCIPAL
-# =============================================================================
-
-if __name__ == "__main__":
-    # ==========================================================================
-    # FUNCIÓN DE ENTRADA INTERACTIVA
-    # ==========================================================================
-
-    def pedir_int(mensaje: str, minimo: int, maximo: int, defecto: int) -> int:
-        """Pide un entero al usuario con validación y valor por defecto."""
-        while True:
-            entrada = input(f"{mensaje} [{defecto}]: ").strip()
-            if entrada == "":
-                return defecto
-            try:
-                valor = int(entrada)
-                if minimo <= valor <= maximo:
-                    return valor
-                print(f"  ✗ Debe estar entre {minimo} y {maximo}.")
-            except ValueError:
-                print("  ✗ Ingresa un número entero.")
-
-    def pedir_float(
-        mensaje: str, minimo: float, maximo: float, defecto: float,
-    ) -> float:
-        """Pide un flotante al usuario con validación y valor por defecto."""
-        while True:
-            entrada = input(f"{mensaje} [{defecto}]: ").strip()
-            if entrada == "":
-                return defecto
-            try:
-                valor = float(entrada)
-                if minimo <= valor <= maximo:
-                    return valor
-                print(f"  ✗ Debe estar entre {minimo} y {maximo}.")
-            except ValueError:
-                print("  ✗ Ingresa un número decimal.")
-
-    def pedir_opcion(mensaje: str, opciones: list, defecto: str) -> str:
-        """Pide al usuario elegir entre opciones válidas."""
-        ops = "/".join(opciones)
-        while True:
-            entrada = input(f"{mensaje} ({ops}) [{defecto}]: ").strip().upper()
-            if entrada == "":
-                return defecto
-            if entrada in [o.upper() for o in opciones]:
-                return entrada
-            print(f"  ✗ Opciones válidas: {ops}")
-
-    def pedir_si_no(mensaje: str, defecto: bool) -> bool:
-        """Pide una respuesta sí/no al usuario."""
-        def_str = "s" if defecto else "n"
-        while True:
-            entrada = input(f"{mensaje} (s/n) [{def_str}]: ").strip().lower()
-            if entrada == "":
-                return defecto
-            if entrada in ("s", "si", "sí", "y", "yes"):
-                return True
-            if entrada in ("n", "no"):
-                return False
-            print("  ✗ Ingresa 's' para sí o 'n' para no.")
-
-    def pedir_restricciones(n_agents: int) -> list:
-        """
-        Pide las restricciones de organización del rover.
-        Cada restricción es una lista donde el primer nodo es el maestro
-        y los siguientes son sus subordinados.
-        Ejemplo: [1, 2, 3] → nodo 1 es maestro de 2 y 3.
-        """
-        print("\n  ── Restricciones de organización ──────────────────────")
-        print(f"  Nodos disponibles: 1 a {n_agents}")
-        print("  Cada restricción define un equipo: el primer nodo es el")
-        print("  maestro y los siguientes son sus subordinados.")
-        print("  Ejemplo: '1 2 3' → nodo 1 es maestro de nodos 2 y 3")
-        print("  Presiona Enter sin escribir nada para terminar.")
-        print()
-
-        constraints = []
-        num = 1
-        while True:
-            entrada = input(
-                f"  Restricción {num} (nodos separados por espacio): ",
-            ).strip()
-
-            # Enter vacío → terminar
-            if entrada == "":
-                if len(constraints) == 0:
-                    print("  ⚠ Sin restricciones. Se usará grafo sin jerarquía.")
-                break
-
-            # Parsear y validar los nodos ingresados
-            try:
-                nodos = [int(x) for x in entrada.split()]
-            except ValueError:
-                print("  ✗ Ingresa números enteros separados por espacio.")
-                continue
-
-            # Validar que sean al menos 2 nodos
-            if len(nodos) < 2:
-                print("  ✗ Necesitas al menos 2 nodos (1 maestro + 1 subordinado).")
-                continue
-
-            # Validar que todos los nodos estén en rango
-            invalidos = [n for n in nodos if n < 1 or n > n_agents]
-            if invalidos:
-                print(
-                    f"  ✗ Nodos fuera de rango: {invalidos}. Deben estar entre 1 y {n_agents}.",
-                )
-                continue
-
-            # Validar que no haya nodos repetidos
-            if len(set(nodos)) != len(nodos):
-                print("  ✗ No puede haber nodos repetidos en una restricción.")
-                continue
-
-            constraints.append(nodos)
-            print(f"  ✓ Restricción {num}: nodo {nodos[0]} es maestro de {nodos[1:]}")
-            num += 1
-
-        return constraints
-
-    def configurar_experimento() -> tuple:
-        """
-        Diálogo interactivo completo.
-        Retorna (ExperimentConfig, cost_matrix).
-        """
-        sep = "─" * 62
-
-        print("\n" + "█" * 62)
-        print("  QEA vs GA — Integrado con Chromosome (Dr. Carvajal)")
-        print("  Beca CeNAT-CONARE | ITCR — CNCA")
-        print("█" * 62)
-        print("\n  Presiona Enter para aceptar el valor por defecto [  ].\n")
-
-        # ── 1. Número de agentes ───────────────────────────────────────
-        print(sep)
-        print("  1. CONFIGURACIÓN DEL PROBLEMA")
-        print(sep)
-        n_agents = pedir_int(
-            "  Número de agentes del rover (n_agents)", minimo=4, maximo=30, defecto=8,
-        )
-        n_genes = n_agents * (n_agents - 1) // 2
-        print(f"  → Genes resultantes: n(n-1)/2 = {n_genes}")
-
-        # ── 2. Escenario ───────────────────────────────────────────────
-        scenario = pedir_opcion(
-            "  Escenario de misión",
-            opciones=["nominal", "safe", "critical"],
-            defecto="nominal",
-        ).lower()
-
-        # ── 3. Restricciones ───────────────────────────────────────────
-        constraints = pedir_restricciones(n_agents)
-
-        # ── 4. Parámetros del QEA ──────────────────────────────────────
-        print(f"\n{sep}")
-        print("  2. PARÁMETROS DEL QEA")
-        print(sep)
-
-        scheme = pedir_opcion(
-            "  Rotation Scheme  (I=complejo, II=conservador, III=agresivo)",
-            opciones=["I", "II", "III"],
-            defecto="I",
-        )
-
-        max_gen = pedir_int(
-            "  Máximo de generaciones", minimo=10, maximo=500, defecto=150,
-        )
-
-        theta_val = pedir_float(
-            "  Ángulo inicial θ₀ en fracción de π (ej: 0.05 = 0.05π)",
-            minimo=0.001,
-            maximo=0.1,
-            defecto=0.05,
-        )
-        theta_initial = theta_val * np.pi
-
-        decay = pedir_float(
-            "  Tasa de decaimiento GDAA λ (ej: 0.02)",
-            minimo=0.001,
-            maximo=0.1,
-            defecto=0.02,
-        )
-
-        # Sugerir automáticamente no usar Qiskit para muchos agentes
-        defecto_qiskit = n_agents <= 15
-        if n_agents > 15:
-            print(f"\n  ⚠ Con {n_agents} agentes ({n_genes} genes) el circuito")
-            print("    Qiskit puede ser lento. Se recomienda usar modo clásico.")
-        use_qiskit = pedir_si_no(
-            "  ¿Usar Qiskit/AerSimulator para la observación cuántica?",
-            defecto=defecto_qiskit,
-        )
-
-        # ── 5. Parámetros del GA ───────────────────────────────────────
-        print(f"\n{sep}")
-        print("  3. PARÁMETROS DEL GA (Dr. Carvajal)")
-        print(sep)
-
-        pop_size = pedir_int(
-            "  Tamaño de la población", minimo=10, maximo=200, defecto=30,
-        )
-
-        mut_rate = pedir_float(
-            "  Tasa de mutación (ej: 0.02 = 2%)", minimo=0.001, maximo=0.2, defecto=0.02,
-        )
-
-        cx_rate = pedir_float(
-            "  Probabilidad de cruce (ej: 0.8 = 80%)",
-            minimo=0.1,
-            maximo=1.0,
-            defecto=0.8,
-        )
-
-        # ── 6. Análisis estadístico ────────────────────────────────────
-        print(f"\n{sep}")
-        print("  4. ANÁLISIS ESTADÍSTICO")
-        print(sep)
-        print("  Nota: para resultados válidos use ≥30 réplicas en el CeNAT.")
-
-        n_replicas = pedir_int(
-            "  Número de réplicas para análisis estadístico",
-            minimo=2,
-            maximo=100,
-            defecto=30,
-        )
-
-        seed = pedir_int(
-            "  Semilla aleatoria (para reproducibilidad)",
-            minimo=0,
-            maximo=99999,
-            defecto=42,
-        )
-
-        # ── Resumen de configuración ───────────────────────────────────
-        print(f"\n{'█' * 62}")
-        print("  RESUMEN DE CONFIGURACIÓN")
-        print(f"{'█' * 62}")
-        print(f"  Agentes         : {n_agents}  →  {n_genes} genes")
-        print(f"  Escenario       : {scenario}")
-        print(f"  Restricciones   : {constraints or 'ninguna'}")
-        print(f"  Rotation Scheme : {scheme}")
-        print(f"  Max generaciones: {max_gen}")
-        print(f"  θ₀              : {theta_val}π = {theta_initial:.5f} rad")
-        print(f"  λ (GDAA)        : {decay}")
-        print(f"  Qiskit          : {'sí' if use_qiskit else 'no (modo clásico)'}")
-        print(f"  Población GA    : {pop_size}")
-        print(f"  Mutación GA     : {mut_rate}")
-        print(f"  Cruce GA        : {cx_rate}")
-        print(f"  Réplicas        : {n_replicas}")
-        print(f"  Semilla         : {seed}")
-        print(f"{'█' * 62}")
-
-        confirmar = pedir_si_no(
-            "\n  ¿Confirmar y ejecutar el experimento?", defecto=True,
-        )
-        if not confirmar:
-            print("\n  Experimento cancelado.")
-            exit(0)
-
-        cfg = ExperimentConfig(
-            n_agents=n_agents,
-            scenario=scenario,
-            max_generations=max_gen,
-            theta_initial=theta_initial,
-            decay_rate=decay,
-            rotation_scheme=scheme,
-            use_qiskit=use_qiskit,
-            pop_size=pop_size,
-            mutation_rate=mut_rate,
-            crossover_rate=cx_rate,
-            constraints=constraints,
-            seed=seed,
-        )
-
-        # Generar MCC con la semilla del experimento
-        rng = np.random.default_rng(seed)
-        cost_matrix = np.zeros((n_agents, n_agents))
-        for i in range(n_agents):
-            for j in range(i + 1, n_agents):
-                c = round(rng.uniform(1.0, 6.0), 3)
-                cost_matrix[i, j] = cost_matrix[j, i] = c
-
-        return cfg, cost_matrix, n_replicas
-
-    # ── Ejecutar diálogo y experimento ─────────────────────────────────
-    cfg, cost_matrix, n_replicas = configurar_experimento()
-
-    evaluator = ChromosomeEvaluator(cfg.n_agents, cost_matrix, cfg.constraints)
-
-    print(f"\n  Genes totales   : {evaluator.n_genes}")
-    print(f"  Genes protegidos: {len(evaluator.get_protected_indices())}")
-    print(f"  Genes libres    : {len(evaluator.get_free_indices())}")
-
-    # ── Ejecutar QEA ───────────────────────────────────────────────────
-    print("\n[1/4] Ejecutando QEA...")
-    qea_result = QEA(cfg, evaluator).run(verbose=True)
-
-    # ── Ejecutar GA ────────────────────────────────────────────────────
-    print("\n[2/4] Ejecutando GA (Dr. Carvajal)...")
-    ga_result = GeneticAlgorithm(cfg, evaluator).run(verbose=True)
-
-    # ── Visualizar ─────────────────────────────────────────────────────
-    print("\n[3/4] Generando figura comparativa...")
-    plot_comparison(
-        qea_result, ga_result, cfg, evaluator, save_path="resultados_integrado.png",
-    )
-
-    # ── Análisis estadístico ───────────────────────────────────────────
-    print(f"\n[4/4] Análisis estadístico ({n_replicas} réplicas)...")
-    stats_cfg = ExperimentConfig(
-        n_agents=cfg.n_agents,
-        scenario=cfg.scenario,
-        max_generations=min(cfg.max_generations, 50),
-        theta_initial=cfg.theta_initial,
-        decay_rate=cfg.decay_rate,
-        rotation_scheme=cfg.rotation_scheme,
-        use_qiskit=False,  # siempre clásico para réplicas masivas
-        pop_size=cfg.pop_size,
-        mutation_rate=cfg.mutation_rate,
-        crossover_rate=cfg.crossover_rate,
-        constraints=cfg.constraints,
-        seed=cfg.seed,
-    )
-    stats = run_statistical_analysis(
-        stats_cfg, cost_matrix, n_replicas=n_replicas, verbose=True,
-    )
-
-    # ── Resumen final ──────────────────────────────────────────────────
-    print("\n" + "█" * 62)
-    print("  RESUMEN FINAL")
-    print("█" * 62)
-    delta = ga_result.best_fitness - qea_result.best_fitness
-    print(f"  QEA mejor CI     : {qea_result.best_fitness:.4f}")
-    print(f"  GA  mejor CI     : {ga_result.best_fitness:.4f}")
-    print(
-        f"  Δ (GA − QEA)     : {delta:+.4f}  "
-        f"({'QEA mejor' if delta > 0 else 'GA mejor' if delta < 0 else 'empate'})",
-    )
-    print("  Función aptitud  : Chromosome.get_total_cost()  ← idéntica en ambos")
-    print(
-        f"  Genes protegidos : {len(evaluator.get_protected_indices())}  "
-        f"← respetados por QEA y GA",
-    )
-    print(
-        f"  Wilcoxon p-valor : {stats['p_value']:.4f}  "
-        f"({'significativo' if stats['significant'] else 'no significativo'})",
-    )
-    print("█" * 62)
