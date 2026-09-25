@@ -13,8 +13,10 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 
 | Archivo | Descripción |
 |---|---|
-| `chromosome.py` | Clase `Chromosome` original (Dr. Carvajal). Codifica una topología como vector binario, aplica restricciones organizacionales y calcula el costo total. **No se modifica.** |
-| `qea_rover_integrado_mejorado.py` | Script principal: evaluador compartido, QEA, GA, análisis estadístico y visualización. Punto de entrada interactivo. |
+| `src/qea/chromosome.py` | Codificación de topologías, restricciones y función de costo. |
+| `src/qea/qea_rover_integrado_mejorado.py` | QEA, GA, análisis estadístico y visualización. |
+| `src/qea/config.py` | Configuración y validación. |
+| `config.toml` | Ejemplo completo de configuración de la CLI. |
 
 ---
 
@@ -23,80 +25,43 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 - Python 3.13 o superior
 
 ```bash
-uv sync
+uv sync --locked
 ```
 
 `qiskit` y `qiskit-aer` solo son necesarios si se usa el modo de observación cuántica real. El script también ofrece un modo clásico (muestreo pseudoaleatorio) que reproduce el colapso del Q-bit sin simulador.
 
 ---
 
-## Uso rápido
+## Ejecución desde la CLI (incluido en un cluster)
 
 ```bash
 git clone https://github.com/johan-carvajal-godinez/QEA.git
 cd QEA
-uv run qea
+uv sync --locked
+uv run --no-sync qea -c config.toml
 ```
 
-El script abre un **diálogo interactivo**. Presiona Enter en cualquier pregunta para aceptar el valor por defecto entre corchetes.
+La CLI no solicita entrada interactiva. `-c` acepta una ruta TOML; sin ella se usan los valores por defecto de `ExperimentConfig`, iguales a los de `config.toml`. Copia ese archivo para cada experimento y cambia sus claves. La validación rechaza claves desconocidas y valores inválidos antes de iniciar el cálculo.
 
-### Parámetros que se solicitan
+| Grupo | Claves principales |
+|---|---|
+| Problema | `n_agents` (mínimo 3), `scenario` (`nominal`, `safe`, `critical`), `max_generations` (mínimo 1), `seed` (entero no negativo), `constraints` |
+| QEA | `theta_initial`, `theta_min`, `decay_rate`, `rotation_scheme` (`I`, `II`, `III`), `use_qiskit`, `aer_method` |
+| GA | `pop_size` (mínimo 3), `mutation_rate` y `crossover_rate` (entre 0 y 1) |
+| Estadística | `n_replicas` (mínimo 2) |
 
-**1. Problema**
+`config.toml` documenta cada parámetro y sus valores de ejemplo. `constraints` es una lista de equipos, por ejemplo `[[1, 2, 3], [4, 5, 6]]`. El primer nodo de cada equipo es el maestro; los restantes son subordinados. Los nodos empiezan en 1 y cada equipo necesita al menos dos nodos distintos dentro de `1..n_agents`.
 
-| Parámetro | Rango | Defecto | Significado |
-|---|---|---|---|
-| `n_agents` | 4–30 | 8 | Subsistemas del rover. Genera `n(n-1)/2` genes |
-| `scenario` | nominal / safe / critical | nominal | Etiqueta del escenario de misión |
-| restricciones | — | ninguna | Equipos de organización (ver abajo) |
+Para una prueba rápida, usa una copia del TOML con `use_qiskit = false`, `max_generations = 2` y `n_replicas = 2`. Qiskit puede ser mucho más lento. Las réplicas estadísticas siempre usan el modo clásico y como máximo 50 generaciones.
 
-**2. QEA**
+Para un trabajo por lotes, instala las dependencias antes de enviarlo y ejecuta desde un directorio de resultados. Usa rutas absolutas en el script del planificador:
 
-| Parámetro | Rango | Defecto | Significado |
-|---|---|---|---|
-| `rotation_scheme` | I / II / III | I | Esquema de la puerta de rotación cuántica |
-| `max_generations` | 10–500 | 150 | Iteraciones |
-| `θ₀` (fracción de π) | 0.001–0.1 | 0.05 | Ángulo de rotación inicial |
-| `λ` (GDAA) | 0.001–0.1 | 0.02 | Tasa de decaimiento exponencial de θ |
-| Qiskit | s/n | s si n≤15 | Observación con `AerSimulator` vs. modo clásico |
-
-**3. GA**
-
-| Parámetro | Rango | Defecto |
-|---|---|---|
-| `pop_size` | 10–200 | 30 |
-| `mutation_rate` | 0.001–0.2 | 0.02 |
-| `crossover_rate` | 0.1–1.0 | 0.8 |
-
-**4. Estadística**
-
-| Parámetro | Rango | Defecto |
-|---|---|---|
-| `n_replicas` | 2–100 | 30 |
-| `seed` | 0–99999 | 42 |
-
-### Definir restricciones de organización
-
-Cada restricción es una lista de nodos separados por espacio. **El primer nodo es el maestro**; los demás son sus subordinados. Los enlaces resultantes quedan **fijados a 1 y protegidos** (*golden genes*): ni el QEA los rota ni el GA los muta.
-
-```
-Restricción 1 (nodos separados por espacio): 1 2 3
-  ✓ Restricción 1: nodo 1 es maestro de [2, 3]
-Restricción 2 (nodos separados por espacio): 4 5 6
-  ✓ Restricción 2: nodo 4 es maestro de [5, 6]
-Restricción 3 (nodos separados por espacio):      ← Enter vacío para terminar
+```bash
+cd /ruta/a/resultados/experimento-01
+/ruta/a/QEA/.venv/bin/qea -c /ruta/a/QEA/config.toml > run.log 2>&1
 ```
 
-Los nodos se numeran **desde 1**, no desde 0.
-
-### Salida
-
-El script ejecuta cuatro fases y produce:
-
-1. Traza de convergencia del QEA en consola (cada 25 generaciones)
-2. Traza de convergencia del GA
-3. **`resultados_integrado.png`** — figura de 6 paneles: convergencia, diversidad, topologías óptimas de QEA y GA, y tabla comparativa
-4. Análisis estadístico: media ± desviación de ambos algoritmos y **prueba de Wilcoxon** (α = 0.05, hipótesis alternativa `QEA < GA`)
+La ejecución imprime el progreso y el resumen en la salida estándar. Guarda `resultados_integrado.png` en el directorio de trabajo; otra ejecución allí sobrescribe la figura. La matriz de costos de comunicación se genera a partir de `seed`; la CLI todavía no acepta una matriz externa. `scenario` solo etiqueta el experimento.
 
 ---
 
@@ -106,7 +71,7 @@ Si prefieres saltarte el diálogo interactivo e integrar el código en tus propi
 
 ```python
 import numpy as np
-from qea_rover_integrado_mejorado import (
+from qea import (
     ExperimentConfig,
     ChromosomeEvaluator,
     QEA,
