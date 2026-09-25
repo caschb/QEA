@@ -46,8 +46,8 @@ class ChromosomeEvaluator:
     Responsabilidades:
       1. Guardar la MCC y las restricciones de organización definidas
          una sola vez para toda la sesión.
-      2. Dado un arreglo binario (genes), inyectarlo en un Chromosome,
-         forzar los golden_genes y retornar get_total_cost().
+      2. Evaluar los genes con los mismos costos y bits protegidos que
+         Chromosome.get_total_cost(), sin reconstruir el objeto por candidato.
       3. Exponer qué índices son "protegidos" (golden) para que el QEA
          no rote esos qubits y el GA no los mute.
 
@@ -76,6 +76,8 @@ class ChromosomeEvaluator:
         # el patrón de golden_genes (bits protegidos)
         ref = self._build_chromosome([0] * self.n_genes)
         self.golden_mask = np.array(ref.get_golden_genes(), dtype=int)
+        row, col = np.triu_indices(n_agents, k=1)
+        self.gene_costs = np.asarray(cost_matrix, dtype=float)[row, col]
         # golden_mask[i] == 1  →  gen i está protegido (siempre vale 1)
 
     # ── helpers internos ───────────────────────────────────────────────
@@ -103,14 +105,16 @@ class ChromosomeEvaluator:
 
     def evaluate(self, binary: np.ndarray) -> float:
         """
-        Evalúa un cromosoma binario y retorna get_total_cost().
+        Evalúa un cromosoma binario con la fórmula de get_total_cost().
 
         Esta es LA ÚNICA función de aptitud usada por QEA y GA.
         Corresponde a la Ecuación 1 de Carvajal-Godínez [6]:
             CI = Σ_i Σ_j  c_ij * A_ij(x*)
         """
-        chrom = self._build_chromosome(binary.tolist())
-        return chrom.get_total_cost()
+        # Chromosome.get_total_cost() sums the upper triangle of the adjacency
+        # matrix. Its gene order is exactly np.triu_indices(..., k=1).
+        genes = np.asarray(binary)
+        return float(np.dot(self.gene_costs, np.maximum(genes, self.golden_mask)))
 
     def enforce_golden(self, binary: np.ndarray) -> np.ndarray:
         """
@@ -455,7 +459,15 @@ class GeneticAlgorithm:
     def run(self, verbose: bool = True) -> AlgorithmResult:
         cfg = self.cfg
         pop = self._init_population()
-        fits = np.array([self.evaluator.evaluate(ind) for ind in pop])
+        fitness_cache: dict[bytes, float] = {}
+
+        def fitness(ind: np.ndarray) -> float:
+            key = ind.tobytes()
+            if key not in fitness_cache:
+                fitness_cache[key] = self.evaluator.evaluate(ind)
+            return fitness_cache[key]
+
+        fits = np.array([fitness(ind) for ind in pop])
         best_idx = np.argmin(fits)
         best_binary = pop[best_idx].copy()
         best_fitness = fits[best_idx]
@@ -485,7 +497,7 @@ class GeneticAlgorithm:
                 new_pop.extend([self._mutate(c1), self._mutate(c2)])
 
             pop = np.array(new_pop[: cfg.pop_size])
-            fits = np.array([self.evaluator.evaluate(ind) for ind in pop])
+            fits = np.array([fitness(ind) for ind in pop])
 
             if fits.min() < best_fitness:
                 best_fitness = fits.min()
