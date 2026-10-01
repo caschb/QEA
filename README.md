@@ -24,7 +24,10 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 | `src/qea/analysis.py` | Réplicas y análisis estadístico. |
 | `src/qea/plotting.py` | Visualización comparativa. |
 | `src/qea/qea_rover_integrado_mejorado.py` | Importaciones de compatibilidad con el módulo original. |
-| `src/qea/config.py` | Configuración y validación. |
+| `src/qea/config.py` | Configuración compartida y lectura TOML. |
+| `src/qea/interface.py` | Contrato de ejecución y contexto compartido. |
+| `src/qea/registry.py` | Registro de algoritmos y sus parámetros. |
+| `src/qea/validation.py` | Validadores comunes. |
 | `config.toml` | Ejemplo completo de configuración de la CLI. |
 
 ---
@@ -54,11 +57,13 @@ La CLI no solicita entrada interactiva. `-c` acepta una ruta TOML; sin ella se u
 
 | Grupo | Claves principales |
 |---|---|
-| Problema | `n_agents` (mínimo 3), `scenario` (`nominal`, `safe`, `critical`), `max_generations` (mínimo 1), `seed` (entero no negativo), `constraints` |
-| QEA | `theta_initial`, `theta_min`, `decay_rate`, `rotation_scheme` (`I`, `II`, `III`), `use_qiskit`, `aer_method` |
-| Entrelazamiento (QEA) | `enable_entanglement`, `entanglement_strength` (radianes, >= 0), `entanglement_gate` (`RXX`, `RZZ`, `BOTH`) |
-| GA | `pop_size` (mínimo 3), `mutation_rate` y `crossover_rate` (entre 0 y 1) |
-| Estadística | `n_replicas` (mínimo 2) |
+| `[problem]` | `n_agents` (mínimo 3), `scenario` (`nominal`, `safe`, `critical`), `constraints` |
+| `[experiment]` | `max_generations` (mínimo 1), `seed` (entero no negativo), `n_replicas` (mínimo 2) |
+| `[algorithms.qea]` | `theta_initial`, `theta_min`, `decay_rate`, `rotation_scheme` (`I`, `II`, `III`), `use_qiskit`, `aer_method` |
+| `[algorithms.qea]` (entrelazamiento) | `enable_entanglement`, `entanglement_strength` (radianes, >= 0), `entanglement_gate` (`RXX`, `RZZ`, `BOTH`) |
+| `[algorithms.ga]` | `pop_size` (mínimo 3), `mutation_rate` y `crossover_rate` (entre 0 y 1) |
+
+El formato TOML anterior con claves en la raíz debe migrarse a estas tablas; las claves antiguas se rechazan. Las tablas omitidas usan sus valores por defecto. Cada algoritmo define y valida su propio dataclass de parámetros.
 
 `config.toml` documenta cada parámetro y sus valores de ejemplo. `constraints` es una lista de equipos, por ejemplo `[[1, 2, 3], [4, 5, 6]]`. El primer nodo de cada equipo es el maestro; los restantes son subordinados. Los nodos empiezan en 1 y cada equipo necesita al menos dos nodos distintos dentro de `1..n_agents`.
 
@@ -86,6 +91,9 @@ from qea import (
     ChromosomeEvaluator,
     QEA,
     GeneticAlgorithm,
+    QEAConfig,
+    GAConfig,
+    RunContext,
     plot_comparison,
     run_statistical_analysis,
 )
@@ -104,8 +112,7 @@ cfg = ExperimentConfig(
     n_agents=n,
     constraints=[[1, 2, 3], [4, 5, 6]],  # nodo 1 maestro de 2,3 — nodo 4 de 5,6
     max_generations=150,
-    rotation_scheme="I",
-    use_qiskit=False,  # True para simulación con Qiskit
+    algorithms={"qea": QEAConfig(use_qiskit=False), "ga": GAConfig()},
     seed=42,
 )
 
@@ -113,14 +120,15 @@ cfg = ExperimentConfig(
 ev = ChromosomeEvaluator(cfg.n_agents, cost_matrix, cfg.constraints)
 
 # 4. Ejecutar
-qea = QEA(cfg, ev).run(verbose=True)
-ga = GeneticAlgorithm(cfg, ev).run(verbose=True)
+context = RunContext(ev, cfg.seed, cfg.max_generations, cfg.scenario)
+qea = QEA(cfg.algorithms["qea"]).run(context)
+ga = GeneticAlgorithm(cfg.algorithms["ga"]).run(context)
 
 print(f"QEA: {qea.best_fitness:.4f}   GA: {ga.best_fitness:.4f}")
 
 # 5. Figura y estadística (opcionales)
 plot_comparison(qea, ga, cfg, ev, save_path="mi_resultado.png")
-stats = run_statistical_analysis(cfg, cost_matrix, n_replicas=30)
+stats = run_statistical_analysis(cfg, cost_matrix)
 ```
 
 Ambos algoritmos devuelven un `AlgorithmResult` con: `best_binary`, `best_fitness`, `fitness_history`, `best_history`, `diversity_history`, `time_elapsed` y `label`.
@@ -190,3 +198,9 @@ Con `use_qiskit = true` y `enable_entanglement = true`, el circuito de observaci
 
 - Carvajal-Godínez, J. — modelo de costo de integración para arquitecturas MAS (Ec. 1)
 - Xiong et al. (2018) — puertas de rotación cuántica en algoritmos evolutivos
+
+## Añadir un algoritmo
+
+Crea un módulo en `src/qea/algorithms/` con un dataclass de parámetros que valide sus valores y una clase con `run(context: RunContext) -> AlgorithmResult`. El constructor recibe solo ese dataclass. Registra ambos en `ALGORITHMS` (`src/qea/registry.py`) mediante `AlgorithmDefinition`; su tabla TOML será `[algorithms.nombre]`. El protocolo `EvolutionaryAlgorithm` no exige herencia ni operadores comunes. Cada ejecución inicializa su estado y generador aleatorio desde el contexto.
+
+En esta etapa, la CLI, las gráficas y la estadística aún comparan QEA y GA. La selección de una colección arbitraria de algoritmos corresponde a la siguiente etapa del refactor. La API Python ahora usa `QEA(QEAConfig(...)).run(context)` y `GeneticAlgorithm(GAConfig(...)).run(context)`; los parámetros específicos ya no son campos de `ExperimentConfig`.

@@ -5,10 +5,10 @@ from dataclasses import replace
 import numpy as np
 from scipy import stats
 
-from .algorithms.ga import GeneticAlgorithm
-from .algorithms.qea import QEA
 from .config import ExperimentConfig
 from .evaluator import ChromosomeEvaluator
+from .interface import RunContext
+from .registry import create_algorithm
 
 
 def run_statistical_analysis(
@@ -36,14 +36,17 @@ def run_statistical_analysis(
         # réplicas deben diferir de la corrida principal solo en la semilla.
         rep_cfg = replace(
             cfg,
-            use_qiskit=False,  # rápido para réplicas masivas
             seed=cfg.seed + rep * 137,
         )
         # Misma evaluador para ambos en esta réplica
         ev = ChromosomeEvaluator(rep_cfg.n_agents, cost_matrix, rep_cfg.constraints)
 
-        qea_r = QEA(rep_cfg, ev).run(verbose=False)
-        ga_r = GeneticAlgorithm(rep_cfg, ev).run(verbose=False)
+        context = RunContext(
+            ev, rep_cfg.seed, rep_cfg.max_generations, rep_cfg.scenario, False
+        )
+        qea_parameters = replace(rep_cfg.algorithms["qea"], use_qiskit=False)
+        qea_r = create_algorithm("qea", qea_parameters).run(context)
+        ga_r = create_algorithm("ga", rep_cfg.algorithms["ga"]).run(context)
 
         qea_scores.append(qea_r.best_fitness)
         ga_scores.append(ga_r.best_fitness)

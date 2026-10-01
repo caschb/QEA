@@ -1,13 +1,64 @@
 """Quantum evolutionary algorithm for rover topologies."""
 
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
-from qea.config import ExperimentConfig
-from qea.evaluator import ChromosomeEvaluator
+from qea.interface import RunContext
 from qea.quantum import QiskitObserver, QuantumChromosome
 from qea.result import AlgorithmResult
+from qea.validation import (
+    ENTANGLEMENT_GATES,
+    ROTATION_SCHEMES,
+    ConfigError,
+    _aer_methods,
+    _check_bool,
+    _check_choice,
+    _check_number,
+)
+
+
+@dataclass(frozen=True)
+class QEAConfig:
+    """Parameters owned and validated by this algorithm."""
+
+    theta_initial: float = 0.05 * np.pi
+    theta_min: float = 0.001 * np.pi
+    decay_rate: float = 0.02
+    rotation_scheme: str = "I"  # "I" | "II" | "III"  ver QuantumChromosome
+    use_qiskit: bool = True
+    # Método de simulación de AerSimulator; solo se valida y se usa si
+    # use_qiskit. "automatic" deja que Aer elija según el circuito.
+    aer_method: str = "automatic"
+    # Entrelazamiento RXX/RZZ entre genes del mismo equipo. Solo actúa con
+    # use_qiskit: el muestreo clásico observa cada qubit por separado.
+    enable_entanglement: bool = True
+    entanglement_strength: float = 0.15 * np.pi  # theta de RXX/RZZ
+    entanglement_gate: str = "RXX"
+
+    def __post_init__(self) -> None:
+        # QEA
+        _check_number("theta_initial", self.theta_initial, 0.0, low_exclusive=True)
+        _check_number("theta_min", self.theta_min, 0.0, low_exclusive=True)
+        if self.theta_min > self.theta_initial:
+            # _gdaa() devuelve max(theta, theta_min): un piso por encima del
+            # ángulo inicial deja el ángulo constante y anula el decaimiento.
+            msg = (
+                f"theta_min ({self.theta_min}) must not exceed theta_initial "
+                f"({self.theta_initial}); the GDAA decay would never apply"
+            )
+            raise ConfigError(msg)
+        _check_number("decay_rate", self.decay_rate, 0.0)
+        # apply_rotation() no tiene rama por defecto: un esquema desconocido
+        # no rota ningún qubit y degrada el QEA a búsqueda aleatoria en silencio.
+        _check_choice("rotation_scheme", self.rotation_scheme, ROTATION_SCHEMES)
+        _check_bool("use_qiskit", self.use_qiskit)
+        if self.use_qiskit:
+            _check_choice("aer_method", self.aer_method, _aer_methods())
+        _check_bool("enable_entanglement", self.enable_entanglement)
+        _check_number("entanglement_strength", self.entanglement_strength, 0.0)
+        _check_choice("entanglement_gate", self.entanglement_gate, ENTANGLEMENT_GATES)
 
 
 class QEA:
@@ -20,20 +71,8 @@ class QEA:
       - Los qubits en golden_mask están bloqueados en el QuantumChromosome
     """
 
-    def __init__(self, cfg: ExperimentConfig, evaluator: ChromosomeEvaluator):
+    def __init__(self, cfg: QEAConfig) -> None:
         self.cfg = cfg
-        self.evaluator = evaluator
-        self.n_genes = evaluator.n_genes
-        self.rng = np.random.default_rng(cfg.seed)
-        if cfg.use_qiskit:
-            self.observer = QiskitObserver(
-                cfg.aer_method,
-                team_groups=(
-                    evaluator.get_team_gene_groups() if cfg.enable_entanglement else []
-                ),
-                entanglement_strength=cfg.entanglement_strength,
-                entanglement_gate=cfg.entanglement_gate,
-            )
 
     def _observe(self, chromosome: QuantumChromosome) -> np.ndarray:
         if self.cfg.use_qiskit:
@@ -52,8 +91,23 @@ class QEA:
         p = np.clip(chrom.prob_one, 1e-10, 1 - 1e-10)
         return float(np.mean(-p * np.log2(p) - (1 - p) * np.log2(1 - p)))
 
-    def run(self, verbose: bool = True) -> AlgorithmResult:
+    def run(self, context: RunContext) -> AlgorithmResult:
         cfg = self.cfg
+        verbose = context.verbose
+        self.evaluator = context.evaluator
+        self.n_genes = context.evaluator.n_genes
+        self.rng = np.random.default_rng(context.seed)
+        if cfg.use_qiskit:
+            self.observer = QiskitObserver(
+                cfg.aer_method,
+                team_groups=(
+                    context.evaluator.get_team_gene_groups()
+                    if cfg.enable_entanglement
+                    else []
+                ),
+                entanglement_strength=cfg.entanglement_strength,
+                entanglement_gate=cfg.entanglement_gate,
+            )
         locked = self.evaluator.get_protected_indices()
 
         # Inicialización
@@ -65,13 +119,15 @@ class QEA:
 
         if verbose:
             print(f"\n{'=' * 62}")
-            print(f"  QEA (integrado con Chromosome) — {cfg.n_agents} agentes")
+            print(
+                f"  QEA (integrado con Chromosome) — {context.evaluator.n_agents} agentes"
+            )
             print(
                 f"  Genes libres: {len(self.evaluator.get_free_indices())} / {self.n_genes}  "
                 f"| Genes protegidos: {len(locked)}",
             )
             print(
-                f"  Escenario: {cfg.scenario.upper()} | θ₀={cfg.theta_initial / np.pi:.4f}π",
+                f"  Escenario: {context.scenario.upper()} | θ₀={cfg.theta_initial / np.pi:.4f}π",
             )
             entanglement = (
                 f"ON ({cfg.entanglement_gate})" if cfg.enable_entanglement else "OFF"
@@ -89,7 +145,7 @@ class QEA:
             print(f"{'-' * 62}")
 
         t0 = time.time()
-        for gen in range(cfg.max_generations):
+        for gen in range(context.max_generations):
             theta = self._gdaa(gen)
             obs = self._observe(chrom)
             curr_f = self.evaluator.evaluate(obs)
@@ -99,7 +155,12 @@ class QEA:
                 best_binary = obs.copy()
 
             chrom.apply_rotation(
-                obs, best_binary, curr_f, best_fitness, theta, cfg.rotation_scheme,
+                obs,
+                best_binary,
+                curr_f,
+                best_fitness,
+                theta,
+                cfg.rotation_scheme,
             )
 
             div = self._diversity(chrom)
@@ -107,7 +168,7 @@ class QEA:
             b_hist.append(best_fitness)
             d_hist.append(div)
 
-            if verbose and (gen % 25 == 0 or gen == cfg.max_generations - 1):
+            if verbose and (gen % 25 == 0 or gen == context.max_generations - 1):
                 print(
                     f"{gen:>6} {curr_f:>12.3f} {best_fitness:>12.3f} "
                     f"{theta / np.pi:>9.5f}π {div:>11.4f}",

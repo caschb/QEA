@@ -7,24 +7,12 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from .algorithms.ga import GeneticAlgorithm
-from .algorithms.qea import QEA
 from .analysis import run_statistical_analysis
-from .config import ExperimentConfig, read_config
+from .config import read_config
 from .evaluator import ChromosomeEvaluator
+from .interface import RunContext
 from .plotting import plot_comparison
-
-__all__ = [
-    "QEA",
-    "ChromosomeEvaluator",
-    "ExperimentConfig",
-    "GeneticAlgorithm",
-    "generate_mcc",
-    "main",
-    "plot_comparison",
-    "read_config",
-    "run_statistical_analysis",
-]
+from .registry import create_algorithm
 
 # Las réplicas del análisis estadístico se acotan a este número de
 # generaciones para que decenas de corridas sigan siendo viables.
@@ -59,13 +47,17 @@ def main() -> None:
     print(f"  Genes libres    : {len(evaluator.get_free_indices())}")
     print(f"  Equipos entrelazados: {len(evaluator.get_team_gene_groups())}")
 
+    context = RunContext(
+        evaluator, config.seed, config.max_generations, config.scenario
+    )
+
     # ── Ejecutar QEA ───────────────────────────────────────────────────
     print("\n[1/4] Ejecutando QEA...")
-    qea_result = QEA(config, evaluator).run(verbose=True)
+    qea_result = create_algorithm("qea", config.algorithms["qea"]).run(context)
 
     # ── Ejecutar GA ────────────────────────────────────────────────────
     print("\n[2/4] Ejecutando GA (Dr. Carvajal)...")
-    ga_result = GeneticAlgorithm(config, evaluator).run(verbose=True)
+    ga_result = create_algorithm("ga", config.algorithms["ga"]).run(context)
 
     # ── Visualizar ─────────────────────────────────────────────────────
     print("\n[3/4] Generando figura comparativa...")
@@ -76,7 +68,6 @@ def main() -> None:
     stats_config = replace(
         config,
         max_generations=min(config.max_generations, STATS_MAX_GENERATIONS),
-        use_qiskit=False,  # siempre clásico para réplicas masivas
     )
     stats = run_statistical_analysis(stats_config, mcc, verbose=True)
 
@@ -97,7 +88,9 @@ def main() -> None:
         f"← respetados por QEA y GA",
     )
     entanglement = (
-        f"ON ({config.entanglement_gate})" if config.enable_entanglement else "OFF"
+        f"ON ({config.algorithms['qea'].entanglement_gate})"
+        if config.algorithms["qea"].enable_entanglement
+        else "OFF"
     )
     print(f"  Entrelazamiento  : {entanglement}  ← solo aplicado en QEA")
     print(

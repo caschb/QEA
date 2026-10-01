@@ -1,12 +1,32 @@
 """Genetic algorithm for rover topologies."""
 
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
-from qea.config import ExperimentConfig
-from qea.evaluator import ChromosomeEvaluator
+from qea.interface import RunContext
 from qea.result import AlgorithmResult
+from qea.validation import (
+    MIN_POP_SIZE,
+    _check_int,
+    _check_number,
+)
+
+
+@dataclass(frozen=True)
+class GAConfig:
+    """Parameters owned and validated by this algorithm."""
+
+    pop_size: int = 30
+    mutation_rate: float = 0.02
+    crossover_rate: float = 0.8
+
+    def __post_init__(self) -> None:
+        # GA
+        _check_int("pop_size", self.pop_size, MIN_POP_SIZE)
+        _check_number("mutation_rate", self.mutation_rate, 0.0, 1.0)
+        _check_number("crossover_rate", self.crossover_rate, 0.0, 1.0)
 
 
 class GeneticAlgorithm:
@@ -19,12 +39,8 @@ class GeneticAlgorithm:
       - El operador de mutación solo actúa sobre get_free_indices()
     """
 
-    def __init__(self, cfg: ExperimentConfig, evaluator: ChromosomeEvaluator):
+    def __init__(self, cfg: GAConfig) -> None:
         self.cfg = cfg
-        self.evaluator = evaluator
-        self.n_genes = evaluator.n_genes
-        self.rng = np.random.default_rng(cfg.seed + 1000)
-        self.free_idx = evaluator.get_free_indices()  # solo estos genes mutan
 
     def _init_population(self) -> np.ndarray:
         pop = self.rng.integers(0, 2, size=(self.cfg.pop_size, self.n_genes))
@@ -55,8 +71,13 @@ class GeneticAlgorithm:
         # enforce_golden por seguridad (cruce puede haber alterado algo)
         return self.evaluator.enforce_golden(result)
 
-    def run(self, verbose: bool = True) -> AlgorithmResult:
+    def run(self, context: RunContext) -> AlgorithmResult:
         cfg = self.cfg
+        verbose = context.verbose
+        self.evaluator = context.evaluator
+        self.n_genes = context.evaluator.n_genes
+        self.rng = np.random.default_rng(context.seed + 1000)
+        self.free_idx = context.evaluator.get_free_indices()
         pop = self._init_population()
         fitness_cache: dict[bytes, float] = {}
 
@@ -75,7 +96,9 @@ class GeneticAlgorithm:
 
         if verbose:
             print(f"\n{'=' * 62}")
-            print(f"  GA (integrado con Chromosome) — {cfg.n_agents} agentes")
+            print(
+                f"  GA (integrado con Chromosome) — {context.evaluator.n_agents} agentes"
+            )
             print(
                 f"  Población: {cfg.pop_size} | Mutación: {cfg.mutation_rate} "
                 f"| Cruce: {cfg.crossover_rate}",
@@ -87,7 +110,7 @@ class GeneticAlgorithm:
             print(f"{'=' * 62}")
 
         t0 = time.time()
-        for gen in range(cfg.max_generations):
+        for gen in range(context.max_generations):
             new_pop = []
             while len(new_pop) < cfg.pop_size:
                 p1 = self._tournament(pop, fits)
@@ -106,7 +129,7 @@ class GeneticAlgorithm:
             b_hist.append(best_fitness)
             d_hist.append(float(np.mean(np.std(pop[:, self.free_idx], axis=0))))
 
-            if verbose and (gen % 25 == 0 or gen == cfg.max_generations - 1):
+            if verbose and (gen % 25 == 0 or gen == context.max_generations - 1):
                 print(
                     f"  Gen {gen:>4} | CI media: {np.mean(fits):>10.3f} "
                     f"| CI mejor: {best_fitness:>10.3f}",
