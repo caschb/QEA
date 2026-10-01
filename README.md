@@ -14,7 +14,16 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 | Archivo | Descripción |
 |---|---|
 | `src/qea/chromosome.py` | Codificación de topologías, restricciones y función de costo. |
-| `src/qea/qea_rover_integrado_mejorado.py` | QEA, GA, análisis estadístico y visualización. |
+| `src/qea/__init__.py` | API pública y entrada de la CLI. |
+| `src/qea/runner.py` | Ejecución del experimento desde la CLI. |
+| `src/qea/evaluator.py` | Evaluador compartido y restricciones de organización. |
+| `src/qea/result.py` | Resultado común de los algoritmos. |
+| `src/qea/algorithms/qea.py` | Algoritmo evolutivo cuántico. |
+| `src/qea/algorithms/ga.py` | Algoritmo genético clásico. |
+| `src/qea/quantum.py` | Cromosoma cuántico, rotaciones y observación Qiskit. |
+| `src/qea/analysis.py` | Réplicas y análisis estadístico. |
+| `src/qea/plotting.py` | Visualización comparativa. |
+| `src/qea/qea_rover_integrado_mejorado.py` | Importaciones de compatibilidad con el módulo original. |
 | `src/qea/config.py` | Configuración y validación. |
 | `config.toml` | Ejemplo completo de configuración de la CLI. |
 
