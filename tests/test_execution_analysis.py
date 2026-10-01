@@ -7,11 +7,12 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")
+mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -20,6 +21,7 @@ from qea import (
     ExperimentConfig,
     GAConfig,
     QEAConfig,
+    RunContext,
     generate_mcc,
     plot_comparison,
     read_config,
@@ -38,29 +40,32 @@ class StubConfig:
 
 
 class StubAlgorithm:
-    contexts = []
+    contexts: ClassVar[list[RunContext]] = []
 
-    def __init__(self, parameters):
+    def __init__(self, parameters: StubConfig) -> None:
         self.parameters = parameters
 
-    def run(self, context):
+    def run(self, context: RunContext) -> AlgorithmResult:
         self.contexts.append(context)
         binary = context.evaluator.enforce_golden(
-            np.zeros(context.evaluator.n_genes, dtype=int)
+            np.zeros(context.evaluator.n_genes, dtype=int),
         )
         cost = context.evaluator.evaluate(binary) + self.parameters.offset
         return AlgorithmResult(
-            binary, cost, best_history=[cost], label="duplicate label"
+            binary,
+            cost,
+            best_history=[cost],
+            label="duplicate label",
         )
 
 
 class ExecutionAnalysisTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.mcc = generate_mcc(42, 4)
         self.evaluator = ChromosomeEvaluator(4, self.mcc, [[1, 2]])
         StubAlgorithm.contexts = []
 
-    def config(self, names=("qea", "ga")):
+    def config(self, names: tuple[str, ...] = ("qea", "ga")) -> ExperimentConfig:
         return ExperimentConfig(
             n_agents=4,
             max_generations=3,
@@ -70,12 +75,12 @@ class ExecutionAnalysisTests(unittest.TestCase):
             algorithms={"qea": QEAConfig(use_qiskit=False), "ga": GAConfig(pop_size=4)},
         )
 
-    def test_selection_and_order(self):
+    def test_selection_and_order(self) -> None:
         for names in (("ga",), ("ga", "qea")):
             results = run_algorithms(self.config(names), self.evaluator, verbose=False)
             self.assertEqual(list(results), list(names))
 
-    def test_selection_validation(self):
+    def test_selection_validation(self) -> None:
         for selection in ("[]", '["ga", "ga"]', '["missing"]', "[true]", '"ga"'):
             with (
                 self.subTest(selection=selection),
@@ -86,7 +91,7 @@ class ExecutionAnalysisTests(unittest.TestCase):
                 with self.assertRaises(ConfigError):
                     read_config(path)
 
-    def test_ga_only_does_not_construct_qea_parameters(self):
+    def test_ga_only_does_not_construct_qea_parameters(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"
             path.write_text('[experiment]\nalgorithms = ["ga"]')
@@ -94,9 +99,10 @@ class ExecutionAnalysisTests(unittest.TestCase):
                 cfg = read_config(path)
             self.assertEqual(set(cfg.algorithms), {"ga"})
 
-    def test_third_algorithm_without_runner_or_analysis_changes(self):
+    def test_third_algorithm_without_runner_or_analysis_changes(self) -> None:
         with patch.dict(
-            ALGORITHMS, {"stub": AlgorithmDefinition(StubConfig, StubAlgorithm)}
+            ALGORITHMS,
+            {"stub": AlgorithmDefinition(StubConfig, StubAlgorithm)},
         ):
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "config.toml"
@@ -119,19 +125,27 @@ offset = 0.25
             self.assertEqual(len(analysis["comparisons"]), 3)
             self.assertEqual(len(analysis["algorithms"]["stub"]["scores"]), 3)
             self.assertEqual(
-                [c.seed for c in StubAlgorithm.contexts], [42, 42, 179, 316]
+                [c.seed for c in StubAlgorithm.contexts],
+                [42, 42, 179, 316],
             )
-            self.assertTrue(all(c.max_generations == 3 for c in StubAlgorithm.contexts))
+            self.assertTrue(
+                all(
+                    c.max_generations == cfg.max_generations
+                    for c in StubAlgorithm.contexts
+                )
+            )
             self.assertEqual(StubAlgorithm.contexts[0].evaluator, self.evaluator)
             self.check_plot(results, cfg)
 
-    def test_single_algorithm_statistics_and_plot(self):
+    def test_single_algorithm_statistics_and_plot(self) -> None:
         cfg = self.config(("ga",))
         analysis = run_statistical_analysis(cfg, self.mcc, verbose=False)
         self.assertEqual(analysis["comparisons"], [])
         self.check_plot(run_algorithms(cfg, self.evaluator, verbose=False), cfg)
 
-    def check_plot(self, results, cfg):
+    def check_plot(
+        self, results: dict[str, AlgorithmResult], cfg: ExperimentConfig
+    ) -> None:
         with (
             tempfile.TemporaryDirectory() as directory,
             contextlib.redirect_stdout(io.StringIO()),
@@ -142,13 +156,13 @@ offset = 0.25
             self.assertGreater(path.stat().st_size, 0)
             self.assertEqual(plt.get_fignums(), before)
 
-    def test_identical_scores_are_not_significant(self):
+    def test_identical_scores_are_not_significant(self) -> None:
         with patch("qea.analysis.stats.wilcoxon", side_effect=AssertionError):
             pair = compare_scores({"a": [1, 1], "b": [1, 1]})[0]
         self.assertEqual(pair["p_value"], 1.0)
         self.assertFalse(pair["significant"])
 
-    def test_holm_correction_and_two_sided_tests(self):
+    def test_holm_correction_and_two_sided_tests(self) -> None:
         with patch(
             "qea.analysis.stats.wilcoxon",
             side_effect=[
@@ -161,24 +175,30 @@ offset = 0.25
         self.assertEqual([p["adjusted_p_value"] for p in pairs], [0.03, 0.06, 0.06])
         self.assertEqual([p["significant"] for p in pairs], [True, False, False])
         self.assertTrue(
-            all(c.kwargs["alternative"] == "two-sided" for c in wilcoxon.call_args_list)
+            all(
+                c.kwargs["alternative"] == "two-sided" for c in wilcoxon.call_args_list
+            ),
         )
 
-    def test_statistics_preserve_quantum_parameters_and_budget(self):
+    def test_statistics_preserve_quantum_parameters_and_budget(self) -> None:
         cfg = ExperimentConfig(
-            n_agents=4, max_generations=51, n_replicas=2, selected_algorithms=("qea",)
+            n_agents=4,
+            max_generations=51,
+            n_replicas=2,
+            selected_algorithms=("qea",),
         )
-        contexts = []
+        contexts: ClassVar[list[RunContext]] = []
 
-        def run(context):
+        def run(context: RunContext) -> AlgorithmResult:
             contexts.append(context)
             return AlgorithmResult(np.zeros(6, dtype=int), 1.0)
 
         with patch(
-            "qea.execution.create_algorithm", return_value=SimpleNamespace(run=run)
+            "qea.execution.create_algorithm",
+            return_value=SimpleNamespace(run=run),
         ) as factory:
             run_statistical_analysis(cfg, self.mcc, verbose=False)
-        self.assertTrue(all(c.max_generations == 51 for c in contexts))
+        self.assertTrue(all(c.max_generations == cfg.max_generations for c in contexts))
         self.assertIs(factory.call_args.args[1], cfg.algorithms["qea"])
         self.assertTrue(factory.call_args.args[1].use_qiskit)
 

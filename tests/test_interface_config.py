@@ -11,6 +11,7 @@ import numpy as np
 from qea import (
     ChromosomeEvaluator,
     EvolutionaryAlgorithm,
+    ExperimentConfig,
     QEAConfig,
     RunContext,
     create_algorithm,
@@ -22,16 +23,16 @@ from qea.validation import ConfigError
 
 
 class InterfaceConfigTests(unittest.TestCase):
-    def read_text(self, text):
+    def read_text(self, text: str) -> ExperimentConfig:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"
             path.write_text(text)
             return read_config(path)
 
-    def test_example_matches_defaults(self):
+    def test_example_matches_defaults(self) -> None:
         self.assertEqual(read_config(Path("config.toml")), read_config(None))
 
-    def test_sections_route_parameters(self):
+    def test_sections_route_parameters(self) -> None:
         cfg = self.read_text("""
 [problem]
 n_agents = 4
@@ -54,7 +55,7 @@ mutation_rate = 0.3
         self.assertFalse(hasattr(cfg.algorithms["ga"], "rotation_scheme"))
         self.assertFalse(hasattr(cfg.algorithms["qea"], "pop_size"))
 
-    def test_rejects_unknown_misplaced_and_invalid_values(self):
+    def test_rejects_unknown_misplaced_and_invalid_values(self) -> None:
         cases = (
             "seed = 42",
             "[problem]\nseed = 42",
@@ -71,23 +72,23 @@ mutation_rate = 0.3
             with self.subTest(text=text), self.assertRaises(ConfigError):
                 self.read_text(text)
 
-    def test_classical_config_does_not_query_aer(self):
+    def test_classical_config_does_not_query_aer(self) -> None:
         with patch("qea.algorithms.qea._aer_methods", side_effect=AssertionError):
             cfg = self.read_text("[algorithms.qea]\nuse_qiskit = false")
         self.assertFalse(cfg.algorithms["qea"].use_qiskit)
 
-    def test_factory_rejects_wrong_parameter_type(self):
+    def test_factory_rejects_wrong_parameter_type(self) -> None:
         with self.assertRaises(ConfigError):
             create_algorithm("ga", QEAConfig(use_qiskit=False))
 
-    def test_seeded_results_preserve_behavior_and_reset_state(self):
+    def test_seeded_results_preserve_behavior_and_reset_state(self) -> None:
         baseline = json.loads(
-            (Path(__file__).parent / "fixtures/seeded_results.json").read_text()
+            (Path(__file__).parent / "fixtures/seeded_results.json").read_text(),
         )
         ev = ChromosomeEvaluator(4, generate_mcc(42, 4), [[1, 2, 3]])
         context = RunContext(ev, 42, 5, verbose=False)
         parameters = load_parameters(
-            {"qea": {"use_qiskit": False}, "ga": {"pop_size": 4}}
+            {"qea": {"use_qiskit": False}, "ga": {"pop_size": 4}},
         )
         for name, label in (("qea", "QEA"), ("ga", "GeneticAlgorithm")):
             algorithm = create_algorithm(name, parameters[name])
@@ -101,10 +102,10 @@ mutation_rate = 0.3
                 }
                 self.assertEqual(values, baseline[label])
                 self.assertTrue(
-                    (result.best_binary[ev.get_protected_indices()] == 1).all()
+                    (result.best_binary[ev.get_protected_indices()] == 1).all(),
                 )
 
-    def test_context_rejects_invalid_budget(self):
+    def test_context_rejects_invalid_budget(self) -> None:
         ev = ChromosomeEvaluator(3, generate_mcc(42, 3))
         with self.assertRaises(ConfigError):
             RunContext(ev, max_generations=0)

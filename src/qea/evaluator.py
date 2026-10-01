@@ -21,8 +21,11 @@ class ChromosomeEvaluator:
     """
 
     def __init__(
-        self, n_agents: int, cost_matrix: np.ndarray, constraints: list | None = None,
-    ):
+        self,
+        n_agents: int,
+        cost_matrix: np.ndarray,
+        constraints: list | None = None,
+    ) -> None:
         """
         Parámetros
         ----------
@@ -61,9 +64,9 @@ class ChromosomeEvaluator:
         golden = chrom.get_golden_genes()
         for i in range(self.n_genes):
             if golden[i] == 1:
-                chrom._genes[i] = 1  # protegido: siempre 1
+                chrom.get_genes()[i] = 1  # protegido: siempre 1
             else:
-                chrom._genes[i] = int(genes[i])
+                chrom.get_genes()[i] = int(genes[i])
 
         return chrom
 

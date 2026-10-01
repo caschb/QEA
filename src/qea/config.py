@@ -38,33 +38,38 @@ class ExperimentConfig:
         _check_constraints(self.constraints, self.n_agents)
         _check_int("n_replicas", self.n_replicas, MIN_REPLICAS)
         if not isinstance(self.algorithms, dict):
-            raise ConfigError("algorithms must be a mapping of validated parameters")
+            msg = "algorithms must be a mapping of validated parameters"
+            raise ConfigError(msg)
         for name, parameters in self.algorithms.items():
             validate_parameters(name, parameters)
         validate_selection(self.selected_algorithms)
         missing = set(self.selected_algorithms) - self.algorithms.keys()
         if missing:
-            raise ConfigError(
-                f"Missing parameters for algorithms: {', '.join(sorted(missing))}"
-            )
+            msg = f"Missing parameters for algorithms: {', '.join(sorted(missing))}"
+            raise ConfigError(msg)
 
 
 def validate_selection(names: object) -> None:
     if not isinstance(names, (list, tuple)) or not names:
-        raise ConfigError("experiment.algorithms must be a nonempty list of names")
+        msg = "experiment.algorithms must be a nonempty list of names"
+        raise ConfigError(msg)
     if any(not isinstance(name, str) for name in names):
-        raise ConfigError("experiment.algorithms must contain string names")
+        msg = "experiment.algorithms must contain string names"
+        raise ConfigError(msg)
     if len(set(names)) != len(names):
-        raise ConfigError("experiment.algorithms must not repeat a name")
+        msg = "experiment.algorithms must not repeat a name"
+        raise ConfigError(msg)
 
 
 def _section(data: dict, name: str, allowed: set[str]) -> dict:
     section = data.get(name, {})
     if not isinstance(section, dict):
-        raise ConfigError(f"{name} must be a TOML table")
+        msg = f"{name} must be a TOML table"
+        raise ConfigError(msg)
     unknown = sorted(set(section) - allowed)
     if unknown:
-        raise ConfigError(f"Unknown keys in {name}: {', '.join(unknown)}")
+        msg = f"Unknown keys in {name}: {', '.join(unknown)}"
+        raise ConfigError(msg)
     return section
 
 
@@ -75,17 +80,19 @@ def read_config(config_path: Path | None) -> ExperimentConfig:
         with config_path.open(mode="rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError) as err:
-        raise ConfigError(
-            f"Could not read TOML configuration {config_path}: {err}"
-        ) from err
+        msg = f"Could not read TOML configuration {config_path}: {err}"
+        raise ConfigError(msg) from err
     _section({"root": data}, "root", {"problem", "experiment", "algorithms"})
     problem = _section(data, "problem", {"n_agents", "scenario", "constraints"})
     experiment = _section(
-        data, "experiment", {"seed", "max_generations", "n_replicas", "algorithms"}
+        data,
+        "experiment",
+        {"seed", "max_generations", "n_replicas", "algorithms"},
     )
     algorithms = data.get("algorithms", {})
     if not isinstance(algorithms, dict):
-        raise ConfigError("algorithms must be a TOML table")
+        msg = "algorithms must be a TOML table"
+        raise ConfigError(msg)
     selected = experiment.pop("algorithms", ["qea", "ga"])
     validate_selection(selected)
     return ExperimentConfig(

@@ -4,13 +4,37 @@ import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit_aer import AerSimulator
 
+ROTATION_TOLERANCE = 1e-10
+
+
+def _rotation_delta(
+    bits: tuple[int, int],
+    *,
+    worse: bool,
+    positive_product: bool,
+    theta: float,
+    scheme: str,
+) -> float:
+    """Select the rotation angle for the observed and elite bits."""
+    xi, xb = bits
+    if scheme == "I":
+        if xi == 1 and xb == 0 and worse:
+            return -theta if positive_product else theta
+        if xi == 0 and xb == 1 and worse:
+            return theta if positive_product else -theta
+        if xi != xb:
+            return (1 if xb == 1 else -1) * theta * 0.5
+    elif (scheme == "II" and xi != xb and worse) or (scheme == "III" and xi != xb):
+        return theta if xb == 1 else -theta
+    return 0.0
+
 
 class QuantumChromosome:
     """
     Cromosoma cuántico con codificación Q-bit.
-    Inicialización: α = β = 1/√2  (superposición uniforme).
+    Inicialización: alpha = beta = 1/√2  (superposición uniforme).
 
-    Los qubits en 'locked_indices' se fijan en β=1 (P(1)=1)
+    Los qubits en 'locked_indices' se fijan en beta=1 (P(1)=1)
     para reflejar los golden_genes de Chromosome.
     """
 
@@ -20,15 +44,16 @@ class QuantumChromosome:
         self.locked = (
             locked_indices if locked_indices is not None else np.array([], dtype=int)
         )
-        # Fijar qubits protegidos: α=0, β=1 → P(1)=1 siempre
+        # Fijar qubits protegidos: alpha=0, beta=1 → P(1)=1 siempre
         for idx in self.locked:
             self.amplitudes[idx] = [0.0, 1.0]
 
     @property
-    def prob_one(self):
+    def prob_one(self) -> np.ndarray:
         return self.amplitudes[:, 1] ** 2
 
-    def apply_rotation(
+    # Keep the explicit observed/elite inputs of the existing rotation API.
+    def apply_rotation(  # noqa: PLR0913, PLR0917
         self,
         observed: np.ndarray,
         best: np.ndarray,
@@ -44,7 +69,7 @@ class QuantumChromosome:
         Tres esquemas disponibles — se selecciona con el parámetro 'scheme':
 
         Scheme I  : 8 condiciones. Combina (xi, xb, f_worse) para decidir
-                    dirección. También aplica rotación suave (θ×0.5) cuando
+                    dirección. También aplica rotación suave (θ*0.5) cuando
                     los bits difieren aunque la solución no sea peor.
                     → Más expresivo, mejor exploración, más complejo.
 
@@ -59,7 +84,7 @@ class QuantumChromosome:
         Comparación resumida:
           Condición para rotar       Scheme I   Scheme II   Scheme III
           xi≠xb  AND  f_worse           ✓           ✓           ✓
-          xi≠xb  AND  NOT f_worse       ✓ (×0.5)    ✗           ✓
+          xi≠xb  AND  NOT f_worse       ✓ (*0.5)    ✗           ✓
         """
         f_worse = curr_fit > best_fit  # True si la solución actual es peor
 
@@ -71,38 +96,16 @@ class QuantumChromosome:
             alpha, beta = self.amplitudes[i]
             delta = 0.0
 
-            # ── Scheme I ──────────────────────────────────────────────
-            # 8 condiciones: considera xi, xb, f_worse y signo de α×β
-            if scheme == "I":
-                if xi == 1 and xb == 0 and f_worse:
-                    # Colapsó a 1 pero élite tiene 0 → empujar hacia 0
-                    delta = -theta if (alpha * beta > 0) else theta
-                elif xi == 0 and xb == 1 and f_worse:
-                    # Colapsó a 0 pero élite tiene 1 → empujar hacia 1
-                    delta = theta if (alpha * beta > 0) else -theta
-                elif xi != xb:
-                    # Bits difieren pero solución no es peor → rotación suave
-                    delta = (1 if xb == 1 else -1) * theta * 0.5
-
-            # ── Scheme II ─────────────────────────────────────────────
-            # Rota SOLO si los bits difieren Y la solución es peor.
-            # Si la solución actual es buena, no toca los qubits.
-            # Más conservador que I y III → converge más lento pero
-            # preserva mejor las soluciones que ya funcionan bien.
-            elif scheme == "II":
-                if xi != xb and f_worse:
-                    delta = theta if xb == 1 else -theta
-
-            # ── Scheme III ────────────────────────────────────────────
-            # Rota siempre que los bits difieren, sin considerar fitness.
-            # Presión constante hacia la élite → convergencia rápida
-            # pero mayor riesgo de pérdida de diversidad prematura.
-            elif scheme == "III":
-                if xi != xb:
-                    delta = theta if xb == 1 else -theta
+            delta = _rotation_delta(
+                (xi, xb),
+                worse=f_worse,
+                positive_product=alpha * beta > 0,
+                theta=theta,
+                scheme=scheme,
+            )
 
             # ── Aplicar rotación y renormalizar ───────────────────────
-            if abs(delta) > 1e-10:
+            if abs(delta) > ROTATION_TOLERANCE:
                 c, s = np.cos(delta), np.sin(delta)
                 na, nb = c * alpha - s * beta, s * alpha + c * beta
                 norm = np.sqrt(na**2 + nb**2)

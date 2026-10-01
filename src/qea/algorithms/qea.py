@@ -120,14 +120,17 @@ class QEA:
         if verbose:
             print(f"\n{'=' * 62}")
             print(
-                f"  QEA (integrado con Chromosome) — {context.evaluator.n_agents} agentes"
+                f"  QEA (integrado con Chromosome) — "
+                f"{context.evaluator.n_agents} agentes",
             )
             print(
-                f"  Genes libres: {len(self.evaluator.get_free_indices())} / {self.n_genes}  "
+                f"  Genes libres: {len(self.evaluator.get_free_indices())} / "
+                f"{self.n_genes}  "
                 f"| Genes protegidos: {len(locked)}",
             )
             print(
-                f"  Escenario: {context.scenario.upper()} | θ₀={cfg.theta_initial / np.pi:.4f}π",
+                f"  Escenario: {context.scenario.upper()} | "
+                f"θ₀={cfg.theta_initial / np.pi:.4f}π",
             )
             entanglement = (
                 f"ON ({cfg.entanglement_gate})" if cfg.enable_entanglement else "OFF"
@@ -140,7 +143,8 @@ class QEA:
             )
             print(f"{'=' * 62}")
             print(
-                f"{'Gen':>6} {'CI actual':>12} {'CI mejor':>12} {'θ':>10} {'Diversidad':>11}",
+                f"{'Gen':>6} {'CI actual':>12} {'CI mejor':>12} {'θ':>10} "
+                f"{'Diversidad':>11}",
             )
             print(f"{'-' * 62}")
 
@@ -177,7 +181,8 @@ class QEA:
         elapsed = time.time() - t0
         if verbose:
             print(
-                f"\n  ✓ QEA completado en {elapsed:.2f}s | Mejor CI = {best_fitness:.4f}",
+                f"\n  ✓ QEA completado en {elapsed:.2f}s | Mejor CI = "
+                f"{best_fitness:.4f}",
             )
 
         return AlgorithmResult(

@@ -53,7 +53,9 @@ class GeneticAlgorithm:
         idx = self.rng.choice(len(pop), k, replace=False)
         return pop[idx[np.argmin(fits[idx])]].copy()
 
-    def _crossover(self, p1: np.ndarray, p2: np.ndarray):
+    def _crossover(
+        self, p1: np.ndarray, p2: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         if self.rng.random() < self.cfg.crossover_rate:
             pt = self.rng.integers(1, self.n_genes)
             c1 = np.concatenate([p1[:pt], p2[pt:]])
@@ -97,7 +99,8 @@ class GeneticAlgorithm:
         if verbose:
             print(f"\n{'=' * 62}")
             print(
-                f"  GA (integrado con Chromosome) — {context.evaluator.n_agents} agentes"
+                f"  GA (integrado con Chromosome) — "
+                f"{context.evaluator.n_agents} agentes",
             )
             print(
                 f"  Población: {cfg.pop_size} | Mutación: {cfg.mutation_rate} "
@@ -138,7 +141,8 @@ class GeneticAlgorithm:
         elapsed = time.time() - t0
         if verbose:
             print(
-                f"\n  ✓ GA completado en {elapsed:.2f}s | Mejor CI = {best_fitness:.4f}",
+                f"\n  ✓ GA completado en {elapsed:.2f}s | Mejor CI = "
+                f"{best_fitness:.4f}",
             )
 
         return AlgorithmResult(

@@ -52,7 +52,8 @@ def main() -> None:
     print("█" * 62)
     for name, result in results.items():
         print(
-            f"  {name}: mejor CI = {result.best_fitness:.4f} | {result.time_elapsed:.2f}s"
+            f"  {name}: mejor CI = {result.best_fitness:.4f} | "
+            f"{result.time_elapsed:.2f}s",
         )
     best = min(result.best_fitness for result in results.values())
     winners = [name for name, result in results.items() if result.best_fitness == best]
@@ -62,6 +63,6 @@ def main() -> None:
         print(
             f"  {pair['left']} vs {pair['right']}: "
             f"p ajustado = {pair['adjusted_p_value']:.4f} "
-            f"({'significativo' if pair['significant'] else 'no significativo'})"
+            f"({'significativo' if pair['significant'] else 'no significativo'})",
         )
     print("█" * 62)

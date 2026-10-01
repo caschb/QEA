@@ -10,6 +10,8 @@ from .config import ExperimentConfig
 from .evaluator import ChromosomeEvaluator
 from .execution import run_algorithms
 
+SIGNIFICANCE_LEVEL = 0.05
+
 
 class PairComparison(TypedDict):
     left: str
@@ -42,19 +44,20 @@ def compare_scores(scores: dict[str, list[float]]) -> list[PairComparison]:
                 "p_value": p_value,
                 "adjusted_p_value": 1.0,
                 "significant": False,
-            }
+            },
         )
     adjusted = 0.0
     for rank, pair in enumerate(sorted(comparisons, key=lambda p: p["p_value"])):
         adjusted = max(adjusted, min(1.0, pair["p_value"] * (len(comparisons) - rank)))
         pair["adjusted_p_value"] = adjusted
-        pair["significant"] = adjusted < 0.05
+        pair["significant"] = adjusted < SIGNIFICANCE_LEVEL
     return comparisons
 
 
 def run_statistical_analysis(
     cfg: ExperimentConfig,
     cost_matrix: np.ndarray,
+    *,
     verbose: bool = True,
 ) -> dict:
     """Repeat the configured experiment, changing only each repetition's seed.
@@ -67,7 +70,10 @@ def run_statistical_analysis(
     for rep in range(cfg.n_replicas):
         evaluator = ChromosomeEvaluator(cfg.n_agents, cost_matrix, cfg.constraints)
         results = run_algorithms(
-            cfg, evaluator, seed=cfg.seed + rep * 137, verbose=False
+            cfg,
+            evaluator,
+            seed=cfg.seed + rep * 137,
+            verbose=False,
         )
         for name, result in results.items():
             scores[name].append(result.best_fitness)
