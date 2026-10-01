@@ -1,7 +1,6 @@
-"""CLI orchestration for the existing QEA versus GA experiment."""
+"""CLI orchestration for selected evolutionary algorithms."""
 
 import argparse
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +9,8 @@ from numpy.typing import NDArray
 from .analysis import run_statistical_analysis
 from .config import read_config
 from .evaluator import ChromosomeEvaluator
-from .interface import RunContext
+from .execution import run_algorithms
 from .plotting import plot_comparison
-from .registry import create_algorithm
-
-# Las réplicas del análisis estadístico se acotan a este número de
-# generaciones para que decenas de corridas sigan siendo viables.
-STATS_MAX_GENERATIONS = 50
 
 
 def create_argument_parser() -> argparse.Namespace:
@@ -47,54 +41,27 @@ def main() -> None:
     print(f"  Genes libres    : {len(evaluator.get_free_indices())}")
     print(f"  Equipos entrelazados: {len(evaluator.get_team_gene_groups())}")
 
-    context = RunContext(
-        evaluator, config.seed, config.max_generations, config.scenario
-    )
+    results = run_algorithms(config, evaluator)
+    print("\nGenerando figura comparativa...")
+    plot_comparison(results, config, evaluator)
+    print(f"\nAnálisis estadístico ({config.n_replicas} réplicas)...")
+    analysis = run_statistical_analysis(config, mcc)
 
-    # ── Ejecutar QEA ───────────────────────────────────────────────────
-    print("\n[1/4] Ejecutando QEA...")
-    qea_result = create_algorithm("qea", config.algorithms["qea"]).run(context)
-
-    # ── Ejecutar GA ────────────────────────────────────────────────────
-    print("\n[2/4] Ejecutando GA (Dr. Carvajal)...")
-    ga_result = create_algorithm("ga", config.algorithms["ga"]).run(context)
-
-    # ── Visualizar ─────────────────────────────────────────────────────
-    print("\n[3/4] Generando figura comparativa...")
-    plot_comparison(qea_result, ga_result, config, evaluator)
-
-    # ── Análisis estadístico ───────────────────────────────────────────
-    print(f"\n[4/4] Análisis estadístico ({config.n_replicas} réplicas)...")
-    stats_config = replace(
-        config,
-        max_generations=min(config.max_generations, STATS_MAX_GENERATIONS),
-    )
-    stats = run_statistical_analysis(stats_config, mcc, verbose=True)
-
-    # ── Resumen final ──────────────────────────────────────────────────
     print("\n" + "█" * 62)
     print("  RESUMEN FINAL")
     print("█" * 62)
-    delta = ga_result.best_fitness - qea_result.best_fitness
-    print(f"  QEA mejor CI     : {qea_result.best_fitness:.4f}")
-    print(f"  GA  mejor CI     : {ga_result.best_fitness:.4f}")
-    print(
-        f"  Δ (GA - QEA)     : {delta:+.4f}  "
-        f"({'QEA mejor' if delta > 0 else 'GA mejor' if delta < 0 else 'empate'})",
-    )
-    print("  Función aptitud  : Chromosome.get_total_cost()  ← idéntica en ambos")
-    print(
-        f"  Genes protegidos : {len(evaluator.get_protected_indices())}  "
-        f"← respetados por QEA y GA",
-    )
-    entanglement = (
-        f"ON ({config.algorithms['qea'].entanglement_gate})"
-        if config.algorithms["qea"].enable_entanglement
-        else "OFF"
-    )
-    print(f"  Entrelazamiento  : {entanglement}  ← solo aplicado en QEA")
-    print(
-        f"  Wilcoxon p-valor : {stats['p_value']:.4f}  "
-        f"({'significativo' if stats['significant'] else 'no significativo'})",
-    )
+    for name, result in results.items():
+        print(
+            f"  {name}: mejor CI = {result.best_fitness:.4f} | {result.time_elapsed:.2f}s"
+        )
+    best = min(result.best_fitness for result in results.values())
+    winners = [name for name, result in results.items() if result.best_fitness == best]
+    print(f"  Mejor resultado: {', '.join(winners)}")
+    print("  Función aptitud: Chromosome.get_total_cost()")
+    for pair in analysis["comparisons"]:
+        print(
+            f"  {pair['left']} vs {pair['right']}: "
+            f"p ajustado = {pair['adjusted_p_value']:.4f} "
+            f"({'significativo' if pair['significant'] else 'no significativo'})"
+        )
     print("█" * 62)

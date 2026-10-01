@@ -5,14 +5,14 @@ from .algorithms.qea import QEA, QEAConfig
 from .analysis import run_statistical_analysis
 from .config import ExperimentConfig, read_config
 from .evaluator import ChromosomeEvaluator
+from .execution import run_algorithms
 from .interface import EvolutionaryAlgorithm, RunContext
 from .plotting import plot_comparison
 from .registry import create_algorithm
-from .runner import STATS_MAX_GENERATIONS, create_argument_parser, generate_mcc, main
+from .runner import create_argument_parser, generate_mcc, main
 
 __all__ = [
     "QEA",
-    "STATS_MAX_GENERATIONS",
     "ChromosomeEvaluator",
     "EvolutionaryAlgorithm",
     "ExperimentConfig",
@@ -26,5 +26,6 @@ __all__ = [
     "main",
     "plot_comparison",
     "read_config",
+    "run_algorithms",
     "run_statistical_analysis",
 ]

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .registry import create_algorithm, default_parameters, load_parameters
+from .registry import default_parameters, load_parameters, validate_parameters
 from .validation import (
     MIN_AGENTS,
     MIN_REPLICAS,
@@ -27,6 +27,7 @@ class ExperimentConfig:
     seed: int = 42
     constraints: list = field(default_factory=list)
     n_replicas: int = 8
+    selected_algorithms: tuple[str, ...] = ("qea", "ga")
     algorithms: dict[str, Any] = field(default_factory=default_parameters)
 
     def __post_init__(self) -> None:
@@ -39,9 +40,22 @@ class ExperimentConfig:
         if not isinstance(self.algorithms, dict):
             raise ConfigError("algorithms must be a mapping of validated parameters")
         for name, parameters in self.algorithms.items():
-            create_algorithm(name, parameters)
-        if not {"qea", "ga"} <= self.algorithms.keys():
-            raise ConfigError("The current comparison requires qea and ga parameters")
+            validate_parameters(name, parameters)
+        validate_selection(self.selected_algorithms)
+        missing = set(self.selected_algorithms) - self.algorithms.keys()
+        if missing:
+            raise ConfigError(
+                f"Missing parameters for algorithms: {', '.join(sorted(missing))}"
+            )
+
+
+def validate_selection(names: object) -> None:
+    if not isinstance(names, (list, tuple)) or not names:
+        raise ConfigError("experiment.algorithms must be a nonempty list of names")
+    if any(not isinstance(name, str) for name in names):
+        raise ConfigError("experiment.algorithms must contain string names")
+    if len(set(names)) != len(names):
+        raise ConfigError("experiment.algorithms must not repeat a name")
 
 
 def _section(data: dict, name: str, allowed: set[str]) -> dict:
@@ -66,10 +80,17 @@ def read_config(config_path: Path | None) -> ExperimentConfig:
         ) from err
     _section({"root": data}, "root", {"problem", "experiment", "algorithms"})
     problem = _section(data, "problem", {"n_agents", "scenario", "constraints"})
-    experiment = _section(data, "experiment", {"seed", "max_generations", "n_replicas"})
+    experiment = _section(
+        data, "experiment", {"seed", "max_generations", "n_replicas", "algorithms"}
+    )
     algorithms = data.get("algorithms", {})
     if not isinstance(algorithms, dict):
         raise ConfigError("algorithms must be a TOML table")
+    selected = experiment.pop("algorithms", ["qea", "ga"])
+    validate_selection(selected)
     return ExperimentConfig(
-        **problem, **experiment, algorithms=load_parameters(algorithms)
+        **problem,
+        **experiment,
+        selected_algorithms=tuple(selected),
+        algorithms=load_parameters(algorithms, tuple(selected)),
     )

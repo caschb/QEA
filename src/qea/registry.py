@@ -22,15 +22,25 @@ ALGORITHMS = {
 
 
 def default_parameters() -> dict[str, Any]:
-    return {name: definition.parameters() for name, definition in ALGORITHMS.items()}
+    return {
+        name: definition.parameters()
+        for name, definition in ALGORITHMS.items()
+        if name in ("qea", "ga")
+    }
 
 
-def load_parameters(sections: dict) -> dict[str, Any]:
+def load_parameters(
+    sections: dict, names: tuple[str, ...] | None = None
+) -> dict[str, Any]:
     unknown = sorted(set(sections) - ALGORITHMS.keys())
     if unknown:
         raise ConfigError(f"Unknown algorithms: {', '.join(unknown)}")
     parameters = {}
-    for name, definition in ALGORITHMS.items():
+    requested = names if names is not None else ("qea", "ga")
+    for name in dict.fromkeys((*requested, *sections)):
+        if name not in ALGORITHMS:
+            raise ConfigError(f"Unknown algorithm: {name}")
+        definition = ALGORITHMS[name]
         section = sections.get(name, {})
         if not isinstance(section, dict):
             raise ConfigError(f"algorithms.{name} must be a TOML table")
@@ -47,10 +57,14 @@ def load_parameters(sections: dict) -> dict[str, Any]:
     return parameters
 
 
-def create_algorithm(name: str, parameters: object) -> EvolutionaryAlgorithm:
+def validate_parameters(name: str, parameters: object) -> None:
     if name not in ALGORITHMS:
         raise ConfigError(f"Unknown algorithm: {name}")
     definition = ALGORITHMS[name]
     if not isinstance(parameters, definition.parameters):
         raise ConfigError(f"Invalid parameters for algorithm {name}")
-    return definition.factory(parameters)
+
+
+def create_algorithm(name: str, parameters: object) -> EvolutionaryAlgorithm:
+    validate_parameters(name, parameters)
+    return ALGORITHMS[name].factory(parameters)

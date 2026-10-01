@@ -1,4 +1,4 @@
-# QEA vs GA — Optimización de topologías MAS para arquitecturas de rover
+# Testbed de algoritmos evolutivos — Topologías MAS para rover
 
 Comparación entre un **Algoritmo Evolutivo Cuántico (QEA)** y un **Algoritmo Genético (GA)** clásico para encontrar la topología de comunicación de menor costo en un sistema multi-agente (MAS), sujeta a restricciones de organización (equipos y jerarquías).
 
@@ -16,6 +16,7 @@ Ambos algoritmos comparten **exactamente la misma función de aptitud** — `Chr
 | `src/qea/chromosome.py` | Codificación de topologías, restricciones y función de costo. |
 | `src/qea/__init__.py` | API pública y entrada de la CLI. |
 | `src/qea/runner.py` | Ejecución del experimento desde la CLI. |
+| `src/qea/execution.py` | Ejecución de la colección seleccionada mediante el protocolo. |
 | `src/qea/evaluator.py` | Evaluador compartido y restricciones de organización. |
 | `src/qea/result.py` | Resultado común de los algoritmos. |
 | `src/qea/algorithms/qea.py` | Algoritmo evolutivo cuántico. |
@@ -58,7 +59,7 @@ La CLI no solicita entrada interactiva. `-c` acepta una ruta TOML; sin ella se u
 | Grupo | Claves principales |
 |---|---|
 | `[problem]` | `n_agents` (mínimo 3), `scenario` (`nominal`, `safe`, `critical`), `constraints` |
-| `[experiment]` | `max_generations` (mínimo 1), `seed` (entero no negativo), `n_replicas` (mínimo 2) |
+| `[experiment]` | `max_generations` (mínimo 1), `seed` (entero no negativo), `n_replicas` (mínimo 2), `algorithms` (lista de nombres registrados, por defecto `["qea", "ga"]`) |
 | `[algorithms.qea]` | `theta_initial`, `theta_min`, `decay_rate`, `rotation_scheme` (`I`, `II`, `III`), `use_qiskit`, `aer_method` |
 | `[algorithms.qea]` (entrelazamiento) | `enable_entanglement`, `entanglement_strength` (radianes, >= 0), `entanglement_gate` (`RXX`, `RZZ`, `BOTH`) |
 | `[algorithms.ga]` | `pop_size` (mínimo 3), `mutation_rate` y `crossover_rate` (entre 0 y 1) |
@@ -67,7 +68,7 @@ El formato TOML anterior con claves en la raíz debe migrarse a estas tablas; la
 
 `config.toml` documenta cada parámetro y sus valores de ejemplo. `constraints` es una lista de equipos, por ejemplo `[[1, 2, 3], [4, 5, 6]]`. El primer nodo de cada equipo es el maestro; los restantes son subordinados. Los nodos empiezan en 1 y cada equipo necesita al menos dos nodos distintos dentro de `1..n_agents`.
 
-Para una prueba rápida, usa una copia del TOML con `use_qiskit = false`, `max_generations = 2` y `n_replicas = 2`. Qiskit puede ser mucho más lento. Las réplicas estadísticas siempre usan el modo clásico y como máximo 50 generaciones.
+Para una prueba rápida, usa una copia del TOML con `use_qiskit = false`, `max_generations = 2` y `n_replicas = 2`. Qiskit puede ser mucho más lento. Las réplicas estadísticas usan los mismos parámetros, backend y generaciones que la corrida principal; solo cambia la semilla. Para pruebas rápidas configura explícitamente el modo clásico y un presupuesto pequeño.
 
 Para un trabajo por lotes, instala las dependencias antes de enviarlo y ejecuta desde un directorio de resultados. Usa rutas absolutas en el script del planificador:
 
@@ -127,7 +128,7 @@ ga = GeneticAlgorithm(cfg.algorithms["ga"]).run(context)
 print(f"QEA: {qea.best_fitness:.4f}   GA: {ga.best_fitness:.4f}")
 
 # 5. Figura y estadística (opcionales)
-plot_comparison(qea, ga, cfg, ev, save_path="mi_resultado.png")
+plot_comparison({"qea": qea, "ga": ga}, cfg, ev, save_path="mi_resultado.png")
 stats = run_statistical_analysis(cfg, cost_matrix)
 ```
 
@@ -178,13 +179,13 @@ El ángulo decae exponencialmente (GDAA): `θ(g) = max(θ₀·e^(−λg), θ_min
 
 ### Entrelazamiento entre genes de equipo
 
-Con `use_qiskit = true` y `enable_entanglement = true`, el circuito de observación aplica, después de las rotaciones RY y antes de medir, compuertas `RXX` y/o `RZZ` de ángulo `entanglement_strength` entre el enlace líder-primer miembro de cada equipo de `constraints` y los enlaces líder-miembro restantes. Se prefieren a CX porque son simétricas y paramétricas: el líder influye sin determinar. El GA no cambia. En modo clásico, incluidas las réplicas estadísticas, no hay efecto.
+Con `use_qiskit = true` y `enable_entanglement = true`, el circuito de observación aplica, después de las rotaciones RY y antes de medir, compuertas `RXX` y/o `RZZ` de ángulo `entanglement_strength` entre el enlace líder-primer miembro de cada equipo de `constraints` y los enlaces líder-miembro restantes. Se prefieren a CX porque son simétricas y paramétricas: el líder influye sin determinar. El GA no cambia. En modo clásico no hay efecto; las réplicas conservan el backend elegido.
 
 ---
 
 ## Notas y limitaciones conocidas
 
-- **`use_qiskit=True` es lento.** Construye y mide un circuito de `n(n-1)/2` qubits por generación, con 1 shot cada vez. Para `n > 15` el script recomienda automáticamente el modo clásico; el análisis estadístico siempre lo fuerza a `False`.
+- **`use_qiskit=True` es lento.** Construye y mide un circuito de `n(n-1)/2` qubits por generación, con 1 shot cada vez. El costo aumenta con el número de agentes; el modo clásico se activa explícitamente con `use_qiskit = false`. Las réplicas conservan esta opción.
 - **El entrelazamiento actual no altera los resultados.** `set_constraint_org_team()` marca como protegidos justamente los enlaces líder-miembro que se entrelazan: sus qubits parten fijos en `|1>` y `enforce_golden()` los vuelve a 1 tras medir. Como las compuertas no tocan ningún qubit libre, la distribución de los cromosomas observados es idéntica con o sin entrelazamiento; solo cambia el costo de simular el circuito.
 - **`scenario` es solo una etiqueta.** Se imprime y aparece en los títulos de la figura, pero no altera la matriz de costos ni las restricciones.
 - **Métodos de coherencia no usados en el flujo principal.** `Chromosome.get_coherence()`, `test_degree_coord()`, `test_degree_funct()` y `get_fitness()` invocan `graph.degree().values()`, sintaxis de NetworkX 1.x que falla en NetworkX 2.0+. No afecta la ejecución porque `get_total_cost()` no depende del grafo, pero esos métodos no son utilizables tal cual con versiones modernas de NetworkX.
@@ -203,4 +204,12 @@ Con `use_qiskit = true` y `enable_entanglement = true`, el circuito de observaci
 
 Crea un módulo en `src/qea/algorithms/` con un dataclass de parámetros que valide sus valores y una clase con `run(context: RunContext) -> AlgorithmResult`. El constructor recibe solo ese dataclass. Registra ambos en `ALGORITHMS` (`src/qea/registry.py`) mediante `AlgorithmDefinition`; su tabla TOML será `[algorithms.nombre]`. El protocolo `EvolutionaryAlgorithm` no exige herencia ni operadores comunes. Cada ejecución inicializa su estado y generador aleatorio desde el contexto.
 
-En esta etapa, la CLI, las gráficas y la estadística aún comparan QEA y GA. La selección de una colección arbitraria de algoritmos corresponde a la siguiente etapa del refactor. La API Python ahora usa `QEA(QEAConfig(...)).run(context)` y `GeneticAlgorithm(GAConfig(...)).run(context)`; los parámetros específicos ya no son campos de `ExperimentConfig`.
+La CLI, las gráficas y la estadística ejecutan los nombres de `[experiment].algorithms` en el orden indicado. Por ejemplo, `algorithms = ["ga"]` ejecuta solo GA; al registrar una nueva clase, añádela a esta lista. Una tabla de parámetros no activa por sí sola un algoritmo. Las gráficas usan el nombre registrado para identificar cada resultado y muestran los diagnósticos internos en paneles separados: las definiciones de aptitud interna y diversidad pueden diferir entre algoritmos. La API Python ahora usa `QEA(QEAConfig(...)).run(context)` y `GeneticAlgorithm(GAConfig(...)).run(context)`; los parámetros específicos ya no son campos de `ExperimentConfig`.
+
+## Resultados y comparaciones estadísticas
+
+`run_algorithms(cfg, evaluator, verbose=False)` devuelve un diccionario `{nombre: AlgorithmResult}`. `plot_comparison(results, cfg, evaluator)` admite cualquier colección no vacía, historias de distinta longitud y diagnósticos ausentes.
+
+`run_statistical_analysis(cfg, cost_matrix)` devuelve `algorithms` (por nombre: `scores`, `times`, `mean`, `std`, `best`, `mean_time`) y `comparisons` (cada par: `left`, `right`, `statistic`, `p_value`, `adjusted_p_value`, `significant`). Las réplicas usan la misma matriz de costos y restricciones, con semillas `seed + rep * 137`. Para cada par se aplica Wilcoxon pareado bilateral y corrección de Holm para la familia de comparaciones, con α=0.05. Pares idénticos reciben p=1; una colección de un algoritmo produce estadísticas descriptivas sin comparaciones. Un menor promedio describe el rendimiento, pero no implica significancia estadística.
+
+Esta API reemplaza la salida específica de QEA/GA y la firma anterior de `plot_comparison`. Se eliminó `STATS_MAX_GENERATIONS`: el análisis ya no acorta corridas ni cambia silenciosamente el backend. El presupuesto sigue expresado en generaciones, que pueden representar cantidades distintas de evaluaciones en cada algoritmo.

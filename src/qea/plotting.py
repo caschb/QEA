@@ -1,8 +1,9 @@
-"""Plots comparing QEA and GA results."""
+"""Comparison plots for a named collection of algorithm results."""
+
+from collections.abc import Mapping
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import gridspec
 
 from .config import ExperimentConfig
 from .evaluator import ChromosomeEvaluator
@@ -10,87 +11,37 @@ from .result import AlgorithmResult
 
 
 def plot_comparison(
-    qea_r: AlgorithmResult,
-    ga_r: AlgorithmResult,
+    results: Mapping[str, AlgorithmResult],
     cfg: ExperimentConfig,
     evaluator: ChromosomeEvaluator,
     save_path: str = "resultados_integrado.png",
-):
+) -> None:
+    """Plot comparable best costs and separate algorithm-specific diagnostics.
 
-    fig = plt.figure(figsize=(16, 10), facecolor="#0a0f18")
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.35)
+    Histories may have different lengths or be absent. Registry names are the
+    identity; result labels need not be unique. Diagnostic scales are separate
+    because algorithms currently use different definitions of diversity/fitness.
+    """
+    if not results:
+        raise ValueError("At least one algorithm result is required")
     bg, grid_c, txt = "#0d1b2a", "#1e3a4a", "#c8d8e8"
+    fig = plt.figure(figsize=(16, 6 + 3.3 * len(results)), facecolor="#0a0f18")
+    grid = fig.add_gridspec(
+        len(results) + 2,
+        3,
+        height_ratios=[1.2, max(0.6, 0.24 * (len(results) + 1))] + [1] * len(results),
+    )
 
-    def sax(ax, title):
+    def style(ax, title):
         ax.set_facecolor(bg)
-        ax.tick_params(colors=txt, labelsize=7)
-        for s in ax.spines.values():
-            s.set_color(grid_c)
-        ax.grid(True, color=grid_c, lw=0.4, alpha=0.7)
-        ax.set_title(title, color=txt, fontsize=9, fontweight="bold", pad=7)
+        ax.tick_params(colors=txt)
+        ax.set_title(title, color=txt, fontsize=10)
+        ax.grid(True, color=grid_c, alpha=0.5)
         ax.xaxis.label.set_color(txt)
         ax.yaxis.label.set_color(txt)
+        for spine in ax.spines.values():
+            spine.set_color(grid_c)
 
-    gens = range(cfg.max_generations)
-
-    # ── Convergencia ────────────────────────────────────────────────────
-    ax1 = fig.add_subplot(gs[0, :2])
-    ax1.plot(
-        gens,
-        qea_r.best_history,
-        color="#00d4aa",
-        lw=2.5,
-        label="QEA — Mejor CI (get_total_cost)",
-        zorder=3,
-    )
-    ax1.plot(
-        gens,
-        qea_r.fitness_history,
-        color="#00d4aa",
-        lw=1,
-        alpha=0.3,
-        ls="--",
-        label="QEA — CI actual",
-    )
-    ax1.plot(
-        gens,
-        ga_r.best_history,
-        color="#4fc3f7",
-        lw=2.5,
-        label="GA  — Mejor CI (get_total_cost)",
-        zorder=3,
-    )
-    ax1.plot(
-        gens,
-        ga_r.fitness_history,
-        color="#4fc3f7",
-        lw=1,
-        alpha=0.3,
-        ls="--",
-        label="GA  — CI media",
-    )
-    ax1.legend(
-        fontsize=7.5, facecolor=bg, labelcolor=txt, framealpha=0.85, edgecolor=grid_c,
-    )
-    ax1.set_xlabel("Generación")
-    ax1.set_ylabel("Costo CI  [get_total_cost()]")
-    sax(
-        ax1,
-        f"Convergencia — {cfg.n_agents} agentes | {cfg.scenario.upper()} "
-        f"| Genes protegidos: {len(evaluator.get_protected_indices())}",
-    )
-
-    # ── Diversidad ──────────────────────────────────────────────────────
-    ax2 = fig.add_subplot(gs[0, 2])
-    ax2.plot(gens, qea_r.diversity_history, color="#00d4aa", lw=1.5, label="QEA")
-    ax2.plot(gens, ga_r.diversity_history, color="#4fc3f7", lw=1.5, label="GA")
-    ax2.legend(fontsize=7, facecolor=bg, labelcolor=txt, edgecolor=grid_c)
-    ax2.set_xlabel("Generación")
-    ax2.set_ylabel("Diversidad")
-    sax(ax2, "Diversidad Poblacional")
-
-    # ── Topologías ──────────────────────────────────────────────────────
-    # Nombres automáticos: escala a cualquier n_agents sin cambiar nada
     agent_names = [f"A{i + 1}" for i in range(cfg.n_agents)]
 
     def draw_topo(ax, binary, node_color, title):
@@ -126,7 +77,9 @@ def plot_comparison(
                 idx += 1
         for i, (x, y) in enumerate(pos):
             ax.add_patch(
-                plt.Circle((x, y), 0.13, color="#0d1b2a", ec=node_color, lw=2, zorder=2),
+                plt.Circle(
+                    (x, y), 0.13, color="#0d1b2a", ec=node_color, lw=2, zorder=2
+                ),
             )
             ax.text(
                 x,
@@ -154,88 +107,76 @@ def plot_comparison(
             fontfamily="monospace",
         )
 
-    ax3 = fig.add_subplot(gs[1, 0])
-    draw_topo(
-        ax3,
-        qea_r.best_binary,
-        "#00d4aa",
-        f"Topología QEA\nCI = {qea_r.best_fitness:.3f}",
-    )
-
-    ax4 = fig.add_subplot(gs[1, 1])
-    draw_topo(
-        ax4,
-        ga_r.best_binary,
-        "#4fc3f7",
-        f"Topología GA\nCI = {ga_r.best_fitness:.3f}",
-    )
-
-    # ── Métricas ────────────────────────────────────────────────────────
-    ax5 = fig.add_subplot(gs[1, 2])
-    ax5.set_facecolor(bg)
-    ax5.axis("off")
-    ax5.set_title(
-        "Métricas Comparativas", color=txt, fontsize=9, fontweight="bold", pad=7,
-    )
-    winner = "QEA ✓" if qea_r.best_fitness < ga_r.best_fitness else "GA ✓"
-    win_c = "#00d4aa" if "QEA" in winner else "#4fc3f7"
-    qea_imp = (
-        (qea_r.fitness_history[0] - qea_r.best_fitness)
-        / max(qea_r.fitness_history[0], 1e-9)
-        * 100
-    )
-    ga_imp = (
-        (ga_r.fitness_history[0] - ga_r.best_fitness)
-        / max(ga_r.fitness_history[0], 1e-9)
-        * 100
-    )
-    rows = [
-        ("Métrica", "QEA", "GA"),
-        ("Mejor CI", f"{qea_r.best_fitness:.3f}", f"{ga_r.best_fitness:.3f}"),
-        ("Mejora %", f"{qea_imp:.1f}%", f"{ga_imp:.1f}%"),
-        ("Tiempo (s)", f"{qea_r.time_elapsed:.2f}", f"{ga_r.time_elapsed:.2f}"),
-        ("Fn. aptitud", "get_total_cost()", "get_total_cost()"),
-        ("Ganador", winner, ""),
-    ]
-    y = 0.93
-    for ri, row in enumerate(rows):
-        for ci, val in enumerate(row):
-            c = (
-                "#ffd700"
-                if ri == 0
-                else (win_c if ri == len(rows) - 1 and ci == 1 else txt)
+    try:
+        convergence = fig.add_subplot(grid[0, :])
+        palette = plt.get_cmap("tab20")
+        for index, (name, result) in enumerate(results.items()):
+            convergence.plot(
+                range(len(result.best_history)),
+                result.best_history,
+                label=name,
+                marker="o" if len(result.best_history) == 1 else None,
+                color=palette(index % 20),
             )
-            ax5.text(
-                0.03 + ci * 0.34,
-                y,
-                val,
-                transform=ax5.transAxes,
-                fontsize=7.5,
-                color=c,
-                fontweight="bold" if ri == 0 else "normal",
-                fontfamily="monospace",
-            )
-        y -= 0.14
-        if ri == 0:
-            line = plt.Line2D(
-                [0.02, 0.98],
-                [y + 0.07, y + 0.07],
-                transform=ax5.transAxes,
-                color=grid_c,
-                lw=0.8,
-            )
-            ax5.add_line(line)
+        style(convergence, "Convergencia — mejor costo encontrado (menor es mejor)")
+        convergence.set_xlabel("Generación")
+        convergence.set_ylabel("Costo CI")
+        convergence.legend(facecolor=bg, labelcolor=txt)
 
-    protected_n = len(evaluator.get_protected_indices())
-    fig.suptitle(
-        f"QEA vs GA — Evaluación compartida: Chromosome.get_total_cost()\n"
-        f"n={cfg.n_agents} agentes | {evaluator.n_genes} genes "
-        f"({protected_n} protegidos, {evaluator.n_genes - protected_n} libres) | "
-        f"Escenario: {cfg.scenario}",
-        color=txt,
-        fontsize=10.5,
-        fontweight="bold",
-        y=0.995,
-    )
-    plt.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="#0a0f18")
+        metrics = fig.add_subplot(grid[1, :])
+        metrics.axis("off")
+        table = metrics.table(
+            cellText=[
+                [name, f"{r.best_fitness:.3f}", f"{r.time_elapsed:.2f}"]
+                for name, r in results.items()
+            ],
+            colLabels=["Algoritmo", "Mejor CI", "Tiempo (s)"],
+            cellLoc="center",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.3)
+        for cell in table.get_celld().values():
+            cell.set_facecolor(bg)
+            cell.set_edgecolor(grid_c)
+            cell.get_text().set_color(txt)
+
+        for index, (name, result) in enumerate(results.items()):
+            row = index + 2
+            topology = fig.add_subplot(grid[row, 0])
+            draw_topo(
+                topology,
+                result.best_binary,
+                palette(index % 20),
+                f"{name} — topología | CI = {result.best_fitness:.3f}",
+            )
+            for column, values, title in (
+                (1, result.fitness_history, "Aptitud interna"),
+                (2, result.diversity_history, "Diversidad interna"),
+            ):
+                ax = fig.add_subplot(grid[row, column])
+                ax.plot(range(len(values)), values, color=palette(index % 20))
+                style(ax, f"{name} — {title} (escala propia)")
+                ax.set_xlabel("Generación")
+                if not values:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "Sin diagnóstico",
+                        color=txt,
+                        transform=ax.transAxes,
+                        ha="center",
+                    )
+        fig.suptitle(
+            f"Comparación de algoritmos — {cfg.n_agents} agentes | {cfg.scenario}\n"
+            f"Evaluación compartida: Chromosome.get_total_cost() | "
+            f"Genes protegidos: {len(evaluator.get_protected_indices())}",
+            color=txt,
+            fontsize=12,
+        )
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
+        fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="#0a0f18")
+    finally:
+        plt.close(fig)
     print(f"  ✓ Figura guardada: {save_path}")

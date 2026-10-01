@@ -1,14 +1,55 @@
-"""Repeated QEA and GA runs and statistical comparison."""
+"""Paired repetitions and statistical comparisons of selected algorithms."""
 
-from dataclasses import replace
+from itertools import combinations
+from typing import TypedDict
 
 import numpy as np
 from scipy import stats
 
 from .config import ExperimentConfig
 from .evaluator import ChromosomeEvaluator
-from .interface import RunContext
-from .registry import create_algorithm
+from .execution import run_algorithms
+
+
+class PairComparison(TypedDict):
+    left: str
+    right: str
+    statistic: float
+    p_value: float
+    adjusted_p_value: float
+    significant: bool
+
+
+def compare_scores(scores: dict[str, list[float]]) -> list[PairComparison]:
+    """Two-sided paired Wilcoxon tests with Holm family-wise correction.
+
+    Identical paired scores yield p=1 without calling Wilcoxon, whose
+    zero-difference case can otherwise produce warnings or NaN values.
+    """
+    comparisons: list[PairComparison] = []
+    for left, right in combinations(scores, 2):
+        differences = np.asarray(scores[left]) - np.asarray(scores[right])
+        if np.all(differences == 0):
+            statistic, p_value = 0.0, 1.0
+        else:
+            test = stats.wilcoxon(scores[left], scores[right], alternative="two-sided")
+            statistic, p_value = float(test.statistic), float(test.pvalue)
+        comparisons.append(
+            {
+                "left": left,
+                "right": right,
+                "statistic": statistic,
+                "p_value": p_value,
+                "adjusted_p_value": 1.0,
+                "significant": False,
+            }
+        )
+    adjusted = 0.0
+    for rank, pair in enumerate(sorted(comparisons, key=lambda p: p["p_value"])):
+        adjusted = max(adjusted, min(1.0, pair["p_value"] * (len(comparisons) - rank)))
+        pair["adjusted_p_value"] = adjusted
+        pair["significant"] = adjusted < 0.05
+    return comparisons
 
 
 def run_statistical_analysis(
@@ -16,83 +57,39 @@ def run_statistical_analysis(
     cost_matrix: np.ndarray,
     verbose: bool = True,
 ) -> dict:
+    """Repeat the configured experiment, changing only each repetition's seed.
+
+    All algorithms in a repetition use the same problem instance. Parameters,
+    backend and generation budget match the main run; no hidden overrides.
     """
-    ≥30 réplicas con semillas distintas.
-    Prueba de Wilcoxon (no paramétrica, α=0.05).
-    Misma ChromosomeEvaluator en QEA y GA → comparación válida.
-    """
-    n_replicas = cfg.n_replicas
-    qea_scores, ga_scores = [], []
-    qea_times, ga_times = [], []
-
-    print(f"\n{'=' * 62}")
-    print(f"  ANÁLISIS ESTADÍSTICO — {n_replicas} réplicas")
-    print(f"  Escenario: {cfg.scenario} | n_agents: {cfg.n_agents}")
-    print(f"{'=' * 62}")
-
-    for rep in range(n_replicas):
-        # replace() conserva el resto de los parámetros de cfg (decay_rate,
-        # rotation_scheme, pop_size, mutation_rate, crossover_rate): las
-        # réplicas deben diferir de la corrida principal solo en la semilla.
-        rep_cfg = replace(
-            cfg,
-            seed=cfg.seed + rep * 137,
+    scores = {name: [] for name in cfg.selected_algorithms}
+    times = {name: [] for name in cfg.selected_algorithms}
+    for rep in range(cfg.n_replicas):
+        evaluator = ChromosomeEvaluator(cfg.n_agents, cost_matrix, cfg.constraints)
+        results = run_algorithms(
+            cfg, evaluator, seed=cfg.seed + rep * 137, verbose=False
         )
-        # Misma evaluador para ambos en esta réplica
-        ev = ChromosomeEvaluator(rep_cfg.n_agents, cost_matrix, rep_cfg.constraints)
-
-        context = RunContext(
-            ev, rep_cfg.seed, rep_cfg.max_generations, rep_cfg.scenario, False
-        )
-        qea_parameters = replace(rep_cfg.algorithms["qea"], use_qiskit=False)
-        qea_r = create_algorithm("qea", qea_parameters).run(context)
-        ga_r = create_algorithm("ga", rep_cfg.algorithms["ga"]).run(context)
-
-        qea_scores.append(qea_r.best_fitness)
-        ga_scores.append(ga_r.best_fitness)
-        qea_times.append(qea_r.time_elapsed)
-        ga_times.append(ga_r.time_elapsed)
-
+        for name, result in results.items():
+            scores[name].append(result.best_fitness)
+            times[name].append(result.time_elapsed)
         if verbose:
-            print(
-                f"  Rep {rep + 1:>3}/{n_replicas} | "
-                f"QEA: {qea_r.best_fitness:>8.3f} | "
-                f"GA:  {ga_r.best_fitness:>8.3f}",
+            summary = " | ".join(
+                f"{name}: {r.best_fitness:.3f}" for name, r in results.items()
             )
-
-    qea_arr = np.array(qea_scores)
-    ga_arr = np.array(ga_scores)
-
-    # Wilcoxon: H₀ = distribuciones iguales / H₁ = QEA < GA
-    stat, p_val = stats.wilcoxon(qea_arr, ga_arr, alternative="less")
-
-    results = {
-        "qea_mean": float(np.mean(qea_arr)),
-        "qea_std": float(np.std(qea_arr)),
-        "qea_best": float(np.min(qea_arr)),
-        "ga_mean": float(np.mean(ga_arr)),
-        "ga_std": float(np.std(ga_arr)),
-        "ga_best": float(np.min(ga_arr)),
-        "wilcoxon_stat": float(stat),
-        "p_value": float(p_val),
-        "significant": p_val < 0.05,
-        "winner": "QEA" if np.mean(qea_arr) < np.mean(ga_arr) else "GA",
-        "qea_scores": qea_scores,
-        "ga_scores": ga_scores,
+            print(f"  Rep {rep + 1}/{cfg.n_replicas} | {summary}")
+    summaries = {
+        name: {
+            "scores": values,
+            "times": times[name],
+            "mean": float(np.mean(values)),
+            "std": float(np.std(values)),
+            "best": float(np.min(values)),
+            "mean_time": float(np.mean(times[name])),
+        }
+        for name, values in scores.items()
     }
-
-    print(f"\n{'─' * 62}")
-    print(
-        f"  QEA : μ={results['qea_mean']:>8.3f} ± {results['qea_std']:.3f} "
-        f"| mejor={results['qea_best']:.3f}",
-    )
-    print(
-        f"  GA  : μ={results['ga_mean']:>8.3f} ± {results['ga_std']:.3f} "
-        f"| mejor={results['ga_best']:.3f}",
-    )
-    print(
-        f"  Wilcoxon : W={stat:.3f}, p={p_val:.4f}  "
-        f"({'SIGNIFICATIVO ✓' if p_val < 0.05 else 'no significativo ✗'})",
-    )
-    print(f"  Ganador  : {results['winner']}")
-    return results
+    comparisons = compare_scores(scores)
+    if verbose:
+        for name, summary in summaries.items():
+            print(f"  {name}: μ={summary['mean']:.3f} ± {summary['std']:.3f}")
+    return {"algorithms": summaries, "comparisons": comparisons}
